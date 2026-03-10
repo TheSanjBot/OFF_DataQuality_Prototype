@@ -1,0 +1,19 @@
+# Python cache/artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Local environments
+.venv/
+venv/
+
+# Local data artifacts (do not commit)
+off_quality.db
+openfoodfacts-products.jsonl
+data/sample_products.jsonl
+
+# OS/editor
+.DS_Store
+Thumbs.db
