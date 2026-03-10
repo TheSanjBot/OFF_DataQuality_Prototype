@@ -3,3 +3,4 @@ streamlit
 pandas
 openai
 pytest
+plotly

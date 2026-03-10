@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -16,6 +18,10 @@ from validation.parity_validator import run_pipeline
 
 RESULT_PATH = Path(__file__).resolve().parent.parent / "results" / "migration_results.json"
 DEFAULT_SOURCE_JSONL = PROJECT_ROOT / "openfoodfacts-products.jsonl"
+STATUS_COLORS = {
+    "MATCH": "#0f766e",
+    "REVIEW": "#be123c",
+}
 
 
 def load_results() -> dict:
@@ -46,9 +52,176 @@ def _rule_dataframe(rule_results: list[dict]) -> pd.DataFrame:
     return frame[columns]
 
 
+def _inject_theme() -> None:
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+        html, body, [class*="st-"], [class*="css"] {
+            font-family: "Space Grotesk", sans-serif;
+        }
+        .block-container {
+            max-width: 1200px;
+            padding-top: 1.2rem;
+            padding-bottom: 2rem;
+        }
+        [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+            padding-right: 0.45rem;
+            padding-left: 0.45rem;
+        }
+        [data-testid="stMetric"] {
+            background: linear-gradient(120deg, #f8fafc 0%, #ecfeff 100%);
+            border: 1px solid #dbeafe;
+            border-radius: 14px;
+            padding: 0.6rem 0.8rem;
+            min-height: 118px;
+        }
+        [data-testid="stMetricLabel"] {
+            font-size: 0.9rem;
+            color: #334155;
+        }
+        [data-testid="stMetricValue"] {
+            color: #0f172a;
+            font-size: 1.55rem;
+            line-height: 1.2;
+        }
+        .hero {
+            border-radius: 16px;
+            border: 1px solid #cbd5e1;
+            background: radial-gradient(circle at 10% 20%, #f0fdfa 0%, #eff6ff 45%, #fff7ed 100%);
+            padding: 1rem 1.2rem;
+            margin-bottom: 1.1rem;
+        }
+        .hero h1 {
+            margin: 0;
+            color: #0b1324;
+            font-size: 1.35rem;
+            letter-spacing: -0.01em;
+        }
+        .hero p {
+            margin: 0.25rem 0 0 0;
+            color: #334155;
+            font-size: 0.95rem;
+        }
+        .mono {
+            font-family: "IBM Plex Mono", monospace;
+        }
+        .section-gap {
+            margin-top: 0.35rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _build_confidence_chart(frame: pd.DataFrame) -> go.Figure:
+    chart_df = frame.copy()
+    chart_df["overall_pct"] = chart_df["overall_confidence"] * 100
+    chart_df["parity_pct"] = chart_df["confidence"] * 100
+    chart_df["llm_pct"] = chart_df["llm_confidence"] * 100
+    chart_df = chart_df.sort_values("overall_pct", ascending=True)
+    chart_df["rule_label"] = [
+        f"{rule} ({overall:.1f}%)"
+        for rule, overall in zip(chart_df["rule_name"], chart_df["overall_pct"])
+    ]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=chart_df["parity_pct"],
+            y=chart_df["rule_label"],
+            orientation="h",
+            name="Parity confidence",
+            marker_color="rgba(29, 78, 216, 0.28)",
+            width=0.34,
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "Parity: %{x:.2f}%<br>"
+                "<extra></extra>"
+            ),
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=chart_df["overall_pct"],
+            y=chart_df["rule_label"],
+            orientation="h",
+            name="Overall confidence",
+            marker_color=[STATUS_COLORS.get(status, "#64748b") for status in chart_df["status"]],
+            width=0.62,
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "Overall: %{x:.2f}%<br>"
+                "<extra></extra>"
+            ),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=chart_df["llm_pct"],
+            y=chart_df["rule_label"],
+            mode="markers",
+            name="LLM confidence",
+            marker=dict(color="#f59e0b", size=10, symbol="diamond", line=dict(color="#7c2d12", width=0.6)),
+            hovertemplate="<b>%{y}</b><br>LLM: %{x:.2f}%<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        height=max(420, 56 * len(chart_df)),
+        margin=dict(l=40, r=70, t=30, b=32),
+        barmode="overlay",
+        xaxis=dict(title="Confidence (%)", range=[0, 105], gridcolor="#e2e8f0", ticksuffix="%"),
+        yaxis=dict(title=None),
+        legend=dict(orientation="h", y=1.08, x=0),
+        plot_bgcolor="#ffffff",
+        paper_bgcolor="#ffffff",
+    )
+    return fig
+
+
+def _build_status_chart(frame: pd.DataFrame) -> go.Figure:
+    status_df = frame["status"].value_counts().rename_axis("status").reset_index(name="count")
+    fig = px.pie(
+        status_df,
+        names="status",
+        values="count",
+        hole=0.62,
+        color="status",
+        color_discrete_map=STATUS_COLORS,
+    )
+    fig.update_layout(
+        height=420,
+        margin=dict(l=5, r=5, t=20, b=5),
+        showlegend=True,
+        legend=dict(orientation="h", y=-0.1, x=0),
+    )
+    fig.update_traces(textinfo="label+value")
+    return fig
+
+
+def _build_table(frame: pd.DataFrame) -> pd.DataFrame:
+    table = frame.copy()
+    table["confidence"] = (table["confidence"] * 100).round(2)
+    table["llm_confidence"] = (table["llm_confidence"] * 100).round(2)
+    table["overall_confidence"] = (table["overall_confidence"] * 100).round(2)
+    table = table.sort_values(by=["status", "overall_confidence"], ascending=[True, False])
+    return table
+
+
 def main() -> None:
     st.set_page_config(page_title="OFF Migration Dashboard", layout="wide")
-    st.title("Open Food Facts Quality Check Migration Dashboard")
+    _inject_theme()
+    st.markdown(
+        """
+        <div class="hero">
+            <h1>Open Food Facts Migration Dashboard</h1>
+            <p>Rule-by-rule parity between legacy Perl checks and generated Python checks.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     with st.sidebar:
         st.subheader("Pipeline")
@@ -79,7 +252,7 @@ def main() -> None:
     summary = payload.get("migration_summary", {})
     rule_results = payload.get("rule_results", [])
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4 = st.columns(4, gap="large")
     col1.metric("Total rules", int(summary.get("total_rules", 0)))
     col2.metric("Passed rules", int(summary.get("passed_rules", 0)))
     col3.metric("Needs review", int(summary.get("rules_needing_review", 0)))
@@ -95,42 +268,69 @@ def main() -> None:
         st.warning("No rule-level results found.")
         return
 
-    st.subheader("Confidence by Rule")
-    st.bar_chart(frame.set_index("rule_name")[["confidence", "llm_confidence", "overall_confidence"]])
+    st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
+    chart_left, chart_right = st.columns([0.7, 0.3], gap="large")
+    with chart_left:
+        st.subheader("Confidence by Rule")
+        st.caption("Thick bar = overall confidence, blue band = parity confidence, amber diamond = LLM confidence.")
+        st.plotly_chart(_build_confidence_chart(frame), use_container_width=True)
+    with chart_right:
+        st.subheader("Rule Status")
+        st.plotly_chart(_build_status_chart(frame), use_container_width=True)
 
     st.subheader("Rule Validation Table")
-    st.dataframe(frame, use_container_width=True, hide_index=True)
+    table = _build_table(frame)
+    st.dataframe(
+        table,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "confidence": st.column_config.NumberColumn("Parity %", format="%.2f"),
+            "llm_confidence": st.column_config.NumberColumn("LLM %", format="%.2f"),
+            "overall_confidence": st.column_config.NumberColumn("Overall %", format="%.2f"),
+        },
+    )
 
     st.subheader("Rule Detail")
     selected_rule_name = st.selectbox("Select rule", frame["rule_name"].tolist())
     selected = next(item for item in rule_results if item["rule_name"] == selected_rule_name)
 
-    left, right = st.columns(2)
-    with left:
-        st.markdown("**Perl logic**")
-        st.code(selected["perl_logic"], language="perl")
-    with right:
-        st.markdown("**Generated Python conversion**")
-        st.code(selected["python_conversion"], language="python")
-        st.caption(f"Conversion provider: {selected.get('conversion_provider', 'n/a')}")
+    summary_cols = st.columns(4, gap="large")
+    summary_cols[0].metric("Status", selected.get("status", "n/a"))
+    summary_cols[1].metric("Parity %", f"{float(selected.get('confidence', 0)) * 100:.2f}")
+    summary_cols[2].metric("Overall %", f"{float(selected.get('overall_confidence', 0)) * 100:.2f}")
+    summary_cols[3].metric("Mismatches", int(selected.get("mismatches", 0)))
+    st.caption(f"Conversion provider: {selected.get('conversion_provider', 'n/a')}")
 
-    st.markdown("**DuckDB Query**")
-    st.code(selected["duckdb_query"], language="sql")
-    st.markdown(f"DuckDB violations: `{selected['duckdb_errors']}`")
+    tab_logic, tab_mismatch, tab_duckdb = st.tabs(["Logic", "Parity Mismatches", "DuckDB View"])
 
-    st.markdown("**Failed test cases (Perl vs Python mismatches)**")
-    failed_cases = selected.get("failed_test_cases", [])
-    if failed_cases:
-        st.dataframe(pd.DataFrame(failed_cases), use_container_width=True, hide_index=True)
-    else:
-        st.success("No mismatches for this rule.")
+    with tab_logic:
+        left, right = st.columns(2)
+        with left:
+            st.markdown("**Perl logic**")
+            st.code(selected["perl_logic"], language="perl")
+        with right:
+            st.markdown("**Generated Python conversion**")
+            st.code(selected["python_conversion"], language="python")
 
-    st.markdown("**DuckDB sample violations**")
-    duckdb_examples = selected.get("duckdb_example_rows", [])
-    if duckdb_examples:
-        st.dataframe(pd.DataFrame(duckdb_examples), use_container_width=True, hide_index=True)
-    else:
-        st.info("No violating rows in DuckDB for this rule.")
+    with tab_mismatch:
+        st.markdown("**Failed test cases (Perl vs Python mismatches)**")
+        failed_cases = selected.get("failed_test_cases", [])
+        if failed_cases:
+            st.dataframe(pd.DataFrame(failed_cases), use_container_width=True, hide_index=True)
+        else:
+            st.success("No mismatches for this rule.")
+
+    with tab_duckdb:
+        st.markdown("**DuckDB query**")
+        st.code(selected["duckdb_query"], language="sql")
+        st.markdown(f"DuckDB violations: `{selected['duckdb_errors']}`")
+        st.markdown("**Sample violating rows**")
+        duckdb_examples = selected.get("duckdb_example_rows", [])
+        if duckdb_examples:
+            st.dataframe(pd.DataFrame(duckdb_examples), use_container_width=True, hide_index=True)
+        else:
+            st.info("No violating rows in DuckDB for this rule.")
 
 
 if __name__ == "__main__":
