@@ -404,13 +404,53 @@ def main() -> None:
 
     st.subheader("Rule Validation Table")
     table = _build_table(frame)
+    show_advanced_table = st.checkbox("Show advanced metrics columns", value=False)
+    if show_advanced_table:
+        visible_columns = [
+            "rule_name",
+            "severity",
+            "products_tested",
+            "perl_errors",
+            "python_errors",
+            "supporting_violations",
+            "positive_matches",
+            "positive_agreement",
+            "positive_coverage",
+            "parity_ci_lower",
+            "evidence_ci_lower",
+            "evidence_posterior_mean",
+            "confidence",
+            "llm_confidence",
+            "overall_confidence",
+            "mismatches",
+            "status",
+            "tag",
+        ]
+    else:
+        visible_columns = [
+            "rule_name",
+            "severity",
+            "products_tested",
+            "perl_errors",
+            "python_errors",
+            "mismatches",
+            "parity_ci_lower",
+            "llm_confidence",
+            "overall_confidence",
+            "status",
+        ]
+
     st.dataframe(
-        table,
+        table[visible_columns],
         use_container_width=True,
         hide_index=True,
         column_config={
+            "rule_name": st.column_config.TextColumn("Rule"),
+            "severity": st.column_config.TextColumn("Severity"),
+            "products_tested": st.column_config.NumberColumn("Products", format="%d"),
             "perl_errors": st.column_config.NumberColumn("Perl violations", format="%d"),
             "python_errors": st.column_config.NumberColumn("Python violations", format="%d"),
+            "mismatches": st.column_config.NumberColumn("Mismatches", format="%d"),
             "supporting_violations": st.column_config.NumberColumn("Evidence count", format="%d"),
             "positive_matches": st.column_config.NumberColumn("Positive matches", format="%d"),
             "positive_agreement": st.column_config.NumberColumn("Positive agreement %", format="%.2f"),
@@ -421,6 +461,8 @@ def main() -> None:
             "confidence": st.column_config.NumberColumn("Parity %", format="%.2f"),
             "llm_confidence": st.column_config.NumberColumn("LLM %", format="%.2f"),
             "overall_confidence": st.column_config.NumberColumn("Overall %", format="%.2f"),
+            "status": st.column_config.TextColumn("Status"),
+            "tag": st.column_config.TextColumn("Tag"),
         },
     )
 
