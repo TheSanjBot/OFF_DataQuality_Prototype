@@ -130,6 +130,22 @@ Generated LLM code is validated in two stages before being accepted:
 If semantic checks fail, the conversion is rejected and falls back to deterministic
 templates unless `LLM_STRICT=1`.
 
+## Confidence Scoring (Statistical)
+
+Rule-level overall confidence uses a conservative statistical formula:
+
+```text
+overall_confidence = llm_confidence * parity_ci_lower_95 * evidence_ci_lower_95
+```
+
+Where:
+
+- `parity_ci_lower_95` is the 95% Wilson lower bound on parity agreement.
+- `evidence_ci_lower_95` is the 95% lower credible bound from a Beta posterior
+  on positive-case agreement (`Beta(positive_matches + 1, supporting_violations - positive_matches + 1)`).
+
+This avoids optimistic confidence inflation when positive evidence is sparse.
+
 ## Automated Tests
 
 Run:

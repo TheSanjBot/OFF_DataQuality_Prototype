@@ -70,6 +70,43 @@ def _first_number(*values: object) -> float | None:
     return None
 
 
+def _apply_deterministic_synthetic_scenarios(index: int, product: Dict[str, object], rng: random.Random) -> None:
+    """Inject deterministic rule-violation scenarios for synthetic datasets.
+
+    This keeps synthetic runs visually informative in the dashboard by ensuring
+    each rule receives recurring, known-positive examples.
+    """
+    bucket = index % 12
+
+    if bucket == 1:
+        # energy_kcal > energy_kj
+        energy_kj = float(product["energy_kj"])
+        product["energy_kcal"] = round(energy_kj + rng.uniform(1.0, 50.0), 1)
+    elif bucket == 2:
+        # sugars > carbohydrates
+        carbohydrates = float(product["carbohydrates"])
+        product["sugars"] = round(carbohydrates + rng.uniform(0.3, 12.0), 1)
+    elif bucket == 3:
+        # saturated_fat > fat
+        fat = float(product["fat"])
+        product["saturated_fat"] = round(fat + rng.uniform(0.3, 10.0), 1)
+    elif bucket == 4:
+        # fat > 105
+        product["fat"] = round(rng.uniform(106.0, 135.0), 1)
+    elif bucket == 5:
+        # saturated_fat > 105
+        product["saturated_fat"] = round(rng.uniform(106.0, 135.0), 1)
+    elif bucket == 6:
+        # carbohydrates > 105
+        product["carbohydrates"] = round(rng.uniform(106.0, 140.0), 1)
+    elif bucket == 7:
+        # sugars > 105
+        product["sugars"] = round(rng.uniform(106.0, 140.0), 1)
+    elif bucket == 8:
+        # missing language_code
+        product["language_code"] = ""
+
+
 def generate_product(index: int, rng: random.Random) -> Dict[str, object]:
     """Generate a single product with occasional quality rule violations."""
     energy_kj = rng.randint(50, 4800)
@@ -107,6 +144,7 @@ def generate_product(index: int, rng: random.Random) -> Dict[str, object]:
         k=1,
     )[0]
     product["language_code"] = language_code
+    _apply_deterministic_synthetic_scenarios(index=index, product=product, rng=rng)
     return product
 
 
@@ -205,7 +243,13 @@ def create_and_load_dataset(
     db_path: Path = DB_PATH,
     source_jsonl: Path | None = None,
 ) -> List[Dict[str, object]]:
-    """Generate a synthetic dataset and load it into DuckDB."""
+    """Build dataset records and load them into DuckDB.
+
+    Notes:
+    - ``seed`` is used only for synthetic generation.
+    - When ``source_jsonl`` is provided, records are streamed from that file and
+      ``seed`` has no effect.
+    """
     if source_jsonl is not None:
         products = extract_products_from_off_jsonl(Path(source_jsonl), max_products=size)
     else:
@@ -224,7 +268,12 @@ def create_and_load_dataset(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate and load prototype dataset.")
     parser.add_argument("--size", type=int, default=300, help="Number of products (100-500 recommended).")
-    parser.add_argument("--seed", type=int, default=17, help="Random seed for reproducibility.")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=17,
+        help="Random seed for synthetic data reproducibility (ignored when --source-jsonl is set).",
+    )
     parser.add_argument(
         "--source-jsonl",
         type=Path,

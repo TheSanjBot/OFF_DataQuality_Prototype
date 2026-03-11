@@ -13,6 +13,8 @@ def test_parity_pipeline_smoke_simulated(tmp_path, monkeypatch) -> None:
         seed=17,
         results_path=results_path,
         source_jsonl=None,
+        use_default_off_source=False,
+        db_path=tmp_path / "off_quality_test.db",
         llm_provider="simulated",
         perl_rules_dir=perl_rules_dir,
     )
@@ -22,3 +24,7 @@ def test_parity_pipeline_smoke_simulated(tmp_path, monkeypatch) -> None:
     assert summary["total_rules"] == 8
     assert summary["passed_rules"] == 8
     assert summary["rules_needing_review"] == 0
+    first_rule = payload["rule_results"][0]
+    assert "parity_ci_lower" in first_rule
+    assert "evidence_ci_lower" in first_rule
+    assert "overall_method" in first_rule

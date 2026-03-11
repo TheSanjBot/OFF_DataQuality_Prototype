@@ -252,13 +252,38 @@ def _build_llm_prompt(rule: Dict[str, object], function_name: str) -> str:
         "operator": rule["operator"],
         "right_operand": rule["right_operand"],
     }
+    examples: List[Dict[str, object]] = []
+    for product, expected, case_name in _semantic_test_cases(rule):
+        examples.append({"case": case_name, "input": product, "expected": expected})
     return (
-        "Convert this rule into Python.\n"
-        f"Function name must be exactly `{function_name}`.\n"
-        "Input argument: product (dict).\n"
-        "Return rule tag string when condition fails, else return None.\n"
-        "Return only valid Python code for the function.\n"
-        f"Rule JSON: {json.dumps(rule_payload)}"
+        "Generate one Python function for a data-quality rule.\n"
+        f"Function name must be exactly: {function_name}\n"
+        "Input: product (dict)\n"
+        "Output: return the rule tag string if the VIOLATION condition is TRUE; else return None.\n"
+        "Important: do NOT invert the condition.\n"
+        "Important: return only Python code, no markdown, no explanation.\n"
+        "Behavior requirements:\n"
+        "- field_comparison and field_threshold rules: if value is missing/non-numeric, return None.\n"
+        '- missing_field rule: None, empty string "", or whitespace-only string => return tag.\n'
+        "- Otherwise return None.\n"
+        f"Rule JSON: {json.dumps(rule_payload)}\n"
+        f"Validation examples (must pass): {json.dumps(examples)}"
+    )
+
+
+def _build_llm_repair_prompt(
+    rule: Dict[str, object],
+    function_name: str,
+    previous_code: str,
+    error_message: str,
+) -> str:
+    return (
+        "Your previous function failed validator checks.\n"
+        f"Validation error: {error_message}\n"
+        "Fix the function so all examples pass.\n"
+        "Return only corrected Python code.\n"
+        f"Previous code:\n{previous_code}\n\n"
+        f"{_build_llm_prompt(rule, function_name)}"
     )
 
 
@@ -282,7 +307,12 @@ def _parse_chat_response(body: str) -> str:
     return _extract_code_block(content)
 
 
-def _call_openrouter(rule: Dict[str, object], function_name: str, model: str) -> str:
+def _call_openrouter(
+    rule: Dict[str, object],
+    function_name: str,
+    model: str,
+    prompt: str | None = None,
+) -> str:
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY is not set.")
@@ -296,7 +326,7 @@ def _call_openrouter(rule: Dict[str, object], function_name: str, model: str) ->
         "model": model_name,
         "messages": [
             {"role": "system", "content": "You are a strict Python code generator for data quality rules."},
-            {"role": "user", "content": _build_llm_prompt(rule, function_name)},
+            {"role": "user", "content": prompt or _build_llm_prompt(rule, function_name)},
         ],
         "temperature": 0.0,
     }
@@ -319,7 +349,12 @@ def _call_openrouter(rule: Dict[str, object], function_name: str, model: str) ->
     return _parse_chat_response(body)
 
 
-def _call_groq(rule: Dict[str, object], function_name: str, model: str) -> str:
+def _call_groq(
+    rule: Dict[str, object],
+    function_name: str,
+    model: str,
+    prompt: str | None = None,
+) -> str:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise RuntimeError("GROQ_API_KEY is not set.")
@@ -335,7 +370,7 @@ def _call_groq(rule: Dict[str, object], function_name: str, model: str) -> str:
         model=model,
         messages=[
             {"role": "system", "content": "You are a strict Python code generator for data quality rules."},
-            {"role": "user", "content": _build_llm_prompt(rule, function_name)},
+            {"role": "user", "content": prompt or _build_llm_prompt(rule, function_name)},
         ],
         temperature=0.0,
     )
@@ -358,8 +393,10 @@ def convert_rule_to_python(
     if provider == "groq":
         strict_llm = os.getenv("LLM_STRICT", "0").strip().lower() in {"1", "true", "yes", "on"}
         chosen_model = model or os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+        first_attempt_code = ""
         try:
             python_code = _call_groq(rule, function_name=function_name, model=chosen_model)
+            first_attempt_code = python_code
             python_code = _normalize_function_name(python_code, function_name=function_name)
             _validate_generated_code(python_code, function_name=function_name)
             _validate_generated_semantics(python_code, function_name=function_name, rule=rule)
@@ -374,20 +411,54 @@ def convert_rule_to_python(
             urlerror.HTTPError,
             TimeoutError,
         ) as exc:
-            if strict_llm:
-                raise RuntimeError(
-                    f"Groq conversion failed and LLM_STRICT=1 is enabled. "
-                    f"Error: {exc.__class__.__name__}: {exc}"
-                ) from exc
-            python_code = _build_python_code(rule, function_name=function_name)
-            _validate_generated_code(python_code, function_name=function_name)
-            _validate_generated_semantics(python_code, function_name=function_name, rule=rule)
-            notes = (
-                f"Groq conversion failed ({exc.__class__.__name__}: {exc}). "
-                "Fell back to deterministic converter."
-            )
-            provider_used = "simulated_fallback"
-            confidence = max(0.70, confidence - 0.05)
+            repair_exc: Exception | None = None
+            try:
+                repair_prompt = _build_llm_repair_prompt(
+                    rule=rule,
+                    function_name=function_name,
+                    previous_code=first_attempt_code or "# no usable code returned in first attempt",
+                    error_message=f"{exc.__class__.__name__}: {exc}",
+                )
+                python_code = _call_groq(
+                    rule,
+                    function_name=function_name,
+                    model=chosen_model,
+                    prompt=repair_prompt,
+                )
+                python_code = _normalize_function_name(python_code, function_name=function_name)
+                _validate_generated_code(python_code, function_name=function_name)
+                _validate_generated_semantics(python_code, function_name=function_name, rule=rule)
+                notes = f"Converted via Groq ({chosen_model}) after repair pass."
+                confidence = min(0.99, confidence + 0.005)
+            except (
+                RuntimeError,
+                ValueError,
+                TypeError,
+                json.JSONDecodeError,
+                urlerror.URLError,
+                urlerror.HTTPError,
+                TimeoutError,
+            ) as second_exc:
+                repair_exc = second_exc
+
+            if repair_exc is not None:
+                if strict_llm:
+                    raise RuntimeError(
+                        f"Groq conversion failed and LLM_STRICT=1 is enabled. "
+                        f"First error: {exc.__class__.__name__}: {exc} | "
+                        f"Repair error: {repair_exc.__class__.__name__}: {repair_exc}"
+                    ) from repair_exc
+                python_code = _build_python_code(rule, function_name=function_name)
+                _validate_generated_code(python_code, function_name=function_name)
+                _validate_generated_semantics(python_code, function_name=function_name, rule=rule)
+                notes = (
+                    f"Groq conversion failed after retry "
+                    f"(first: {exc.__class__.__name__}: {exc}; "
+                    f"retry: {repair_exc.__class__.__name__}: {repair_exc}). "
+                    "Fell back to deterministic converter."
+                )
+                provider_used = "simulated_fallback"
+                confidence = max(0.70, confidence - 0.05)
     elif provider == "openrouter":
         strict_llm = os.getenv("LLM_STRICT", "0").strip().lower() in {"1", "true", "yes", "on"}
         primary_model = model or os.getenv("OPENROUTER_MODEL", "arcee-ai/trinity-large-preview:free")
@@ -402,8 +473,10 @@ def convert_rule_to_python(
         used_fallback_model = False
 
         for idx, candidate_model in enumerate(model_candidates):
+            first_attempt_code = ""
             try:
                 candidate_code = _call_openrouter(rule, function_name=function_name, model=candidate_model)
+                first_attempt_code = candidate_code
                 candidate_code = _normalize_function_name(candidate_code, function_name=function_name)
                 _validate_generated_code(candidate_code, function_name=function_name)
                 _validate_generated_semantics(candidate_code, function_name=function_name, rule=rule)
@@ -420,7 +493,39 @@ def convert_rule_to_python(
                 urlerror.HTTPError,
                 TimeoutError,
             ) as exc:
-                errors.append(f"{candidate_model}: {exc.__class__.__name__}: {exc}")
+                try:
+                    repair_prompt = _build_llm_repair_prompt(
+                        rule=rule,
+                        function_name=function_name,
+                        previous_code=first_attempt_code or "# no usable code returned in first attempt",
+                        error_message=f"{exc.__class__.__name__}: {exc}",
+                    )
+                    candidate_code = _call_openrouter(
+                        rule,
+                        function_name=function_name,
+                        model=candidate_model,
+                        prompt=repair_prompt,
+                    )
+                    candidate_code = _normalize_function_name(candidate_code, function_name=function_name)
+                    _validate_generated_code(candidate_code, function_name=function_name)
+                    _validate_generated_semantics(candidate_code, function_name=function_name, rule=rule)
+                    generated_code = candidate_code
+                    chosen_model = candidate_model
+                    used_fallback_model = idx > 0
+                    break
+                except (
+                    RuntimeError,
+                    ValueError,
+                    TypeError,
+                    json.JSONDecodeError,
+                    urlerror.URLError,
+                    urlerror.HTTPError,
+                    TimeoutError,
+                ) as second_exc:
+                    errors.append(
+                        f"{candidate_model}: first={exc.__class__.__name__}: {exc}; "
+                        f"retry={second_exc.__class__.__name__}: {second_exc}"
+                    )
 
         if generated_code is not None:
             python_code = generated_code
