@@ -4,3 +4,5 @@ pandas
 openai
 pytest
 plotly
+dbt-duckdb
+soda-duckdb

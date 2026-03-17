@@ -1,9 +1,11 @@
-"""Streamlit dashboard for migration prototype outputs."""
+"""Streamlit dashboard for cross-engine migration comparison."""
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
+from typing import Dict, List, Mapping
 
 import pandas as pd
 import plotly.express as px
@@ -14,138 +16,21 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from validation.parity_validator import run_pipeline
+from validation.engine_comparison import COMPARISON_PATH, run_engine_comparison
 
-RESULT_PATH = Path(__file__).resolve().parent.parent / "results" / "migration_results.json"
 DEFAULT_SOURCE_JSONL = PROJECT_ROOT / "openfoodfacts-products.jsonl"
-STATUS_COLORS = {
-    "MATCH": "#0f766e",
-    "REVIEW": "#be123c",
+ENGINE_COLORS = {
+    "python": "#2563eb",
+    "dbt": "#f97316",
+    "soda": "#10b981",
 }
 
 
-def load_results() -> dict:
-    if not RESULT_PATH.exists():
+def load_report() -> dict:
+    if not COMPARISON_PATH.exists():
         return {}
-    with RESULT_PATH.open("r", encoding="utf-8") as handle:
+    with COMPARISON_PATH.open("r", encoding="utf-8") as handle:
         return json.load(handle)
-
-
-def _rule_dataframe(rule_results: list[dict]) -> pd.DataFrame:
-    if not rule_results:
-        return pd.DataFrame()
-    frame = pd.DataFrame(rule_results)
-    default_values = {
-        "rule_name": "unknown_rule",
-        "severity": "warning",
-        "products_tested": 0,
-        "perl_errors": 0,
-        "python_errors": 0,
-        "supporting_violations": 0,
-        "positive_matches": 0,
-        "positive_agreement": 0.0,
-        "positive_coverage": 0.0,
-        "parity_ci_lower": 0.0,
-        "parity_ci_upper": 0.0,
-        "coverage_ci_lower": 0.0,
-        "coverage_ci_upper": 0.0,
-        "evidence_alpha": 1.0,
-        "evidence_beta": 1.0,
-        "evidence_posterior_mean": 0.5,
-        "evidence_ci_lower": 0.05,
-        "evidence_ci_upper": 0.95,
-        "evidence_factor": 0.0,
-        "matches": 0,
-        "mismatches": 0,
-        "confidence": 0.0,
-        "llm_confidence": 0.0,
-        "overall_confidence": 0.0,
-        "status": "REVIEW",
-        "tag": "",
-    }
-    for column, default in default_values.items():
-        if column not in frame.columns:
-            frame[column] = default
-
-    # Backward compatibility for results generated before evidence fields existed.
-    if "supporting_violations" in frame.columns and (
-        frame["supporting_violations"].isna().any() or (frame["supporting_violations"] == 0).all()
-    ):
-        if "perl_errors" in frame.columns and "python_errors" in frame.columns:
-            frame["supporting_violations"] = frame[["perl_errors", "python_errors"]].max(axis=1)
-    if "positive_coverage" in frame.columns and (
-        frame["positive_coverage"].isna().any() or (frame["positive_coverage"] == 0).all()
-    ):
-        denom = frame["products_tested"].replace(0, 1)
-        frame["positive_coverage"] = frame["supporting_violations"] / denom
-    if "evidence_factor" in frame.columns and (
-        frame["evidence_factor"].isna().any() or (frame["evidence_factor"] == 0).all()
-    ):
-        frame["evidence_factor"] = (frame["positive_coverage"] / 0.05).clip(upper=1.0)
-    if "evidence_posterior_mean" in frame.columns and (
-        frame["evidence_posterior_mean"].isna().any() or (frame["evidence_posterior_mean"] == 0).all()
-    ):
-        frame["evidence_posterior_mean"] = frame["evidence_factor"].replace(0, 0.5)
-    if "evidence_ci_lower" in frame.columns and (
-        frame["evidence_ci_lower"].isna().any() or (frame["evidence_ci_lower"] == 0).all()
-    ):
-        frame["evidence_ci_lower"] = frame["evidence_factor"].replace(0, 0.05)
-    if "evidence_ci_upper" in frame.columns and (
-        frame["evidence_ci_upper"].isna().any() or (frame["evidence_ci_upper"] == 0).all()
-    ):
-        frame["evidence_ci_upper"] = frame["evidence_posterior_mean"].clip(lower=0.05, upper=0.99)
-    if "evidence_alpha" in frame.columns and (
-        frame["evidence_alpha"].isna().any() or (frame["evidence_alpha"] == 0).all()
-    ):
-        frame["evidence_alpha"] = frame["positive_matches"] + 1.0
-    if "evidence_beta" in frame.columns and (
-        frame["evidence_beta"].isna().any() or (frame["evidence_beta"] == 0).all()
-    ):
-        frame["evidence_beta"] = (frame["supporting_violations"] - frame["positive_matches"]).clip(lower=0) + 1.0
-    if "positive_agreement" in frame.columns and (
-        frame["positive_agreement"].isna().any() or (frame["positive_agreement"] == 0).all()
-    ):
-        denom = frame["supporting_violations"].replace(0, 1)
-        frame["positive_agreement"] = frame["positive_matches"] / denom
-    if "parity_ci_lower" in frame.columns and (
-        frame["parity_ci_lower"].isna().any() or (frame["parity_ci_lower"] == 0).all()
-    ):
-        frame["parity_ci_lower"] = frame["confidence"]
-    if "parity_ci_upper" in frame.columns and (
-        frame["parity_ci_upper"].isna().any() or (frame["parity_ci_upper"] == 0).all()
-    ):
-        frame["parity_ci_upper"] = frame["confidence"]
-    if "coverage_ci_lower" in frame.columns and (
-        frame["coverage_ci_lower"].isna().any() or (frame["coverage_ci_lower"] == 0).all()
-    ):
-        frame["coverage_ci_lower"] = frame["positive_coverage"]
-    if "coverage_ci_upper" in frame.columns and (
-        frame["coverage_ci_upper"].isna().any() or (frame["coverage_ci_upper"] == 0).all()
-    ):
-        frame["coverage_ci_upper"] = frame["positive_coverage"]
-
-    columns = [
-        "rule_name",
-        "severity",
-        "products_tested",
-        "perl_errors",
-        "python_errors",
-        "supporting_violations",
-        "positive_matches",
-        "positive_agreement",
-        "positive_coverage",
-        "parity_ci_lower",
-        "evidence_ci_lower",
-        "evidence_posterior_mean",
-        "matches",
-        "mismatches",
-        "confidence",
-        "llm_confidence",
-        "overall_confidence",
-        "status",
-        "tag",
-    ]
-    return frame[columns]
 
 
 def _inject_theme() -> None:
@@ -157,13 +42,9 @@ def _inject_theme() -> None:
             font-family: "Space Grotesk", sans-serif;
         }
         .block-container {
-            max-width: 1200px;
-            padding-top: 1.2rem;
+            max-width: 1260px;
+            padding-top: 1.15rem;
             padding-bottom: 2rem;
-        }
-        [data-testid="stHorizontalBlock"] > [data-testid="column"] {
-            padding-right: 0.45rem;
-            padding-left: 0.45rem;
         }
         [data-testid="stMetric"] {
             background: linear-gradient(120deg, #f8fafc 0%, #ecfeff 100%);
@@ -172,14 +53,38 @@ def _inject_theme() -> None:
             padding: 0.6rem 0.8rem;
             min-height: 118px;
         }
-        [data-testid="stMetricLabel"] {
-            font-size: 0.9rem;
-            color: #334155;
+        [data-testid="stMetricLabel"] > div {
+            white-space: normal !important;
+            line-height: 1.15;
         }
-        [data-testid="stMetricValue"] {
+        [data-testid="stMetricValue"] > div {
+            line-height: 1.15;
+        }
+        .stat-chip {
+            border-radius: 14px;
+            border: 1px solid #dbeafe;
+            background: linear-gradient(135deg, #f8fafc 0%, #ecfeff 100%);
+            padding: 0.70rem 0.85rem;
+            min-height: 104px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow-wrap: anywhere;
+        }
+        .stat-chip .label {
+            color: #475569;
+            font-size: 0.78rem;
+            line-height: 1.1rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .stat-chip .value {
             color: #0f172a;
-            font-size: 1.55rem;
-            line-height: 1.2;
+            font-size: 1.22rem;
+            font-weight: 700;
+            line-height: 1.35rem;
+            margin-top: 0.45rem;
         }
         .hero {
             border-radius: 16px;
@@ -191,19 +96,13 @@ def _inject_theme() -> None:
         .hero h1 {
             margin: 0;
             color: #0b1324;
-            font-size: 1.35rem;
+            font-size: 1.38rem;
             letter-spacing: -0.01em;
         }
         .hero p {
-            margin: 0.25rem 0 0 0;
+            margin: 0.3rem 0 0 0;
             color: #334155;
             font-size: 0.95rem;
-        }
-        .mono {
-            font-family: "IBM Plex Mono", monospace;
-        }
-        .section-gap {
-            margin-top: 0.35rem;
         }
         </style>
         """,
@@ -211,65 +110,137 @@ def _inject_theme() -> None:
     )
 
 
-def _build_confidence_chart(frame: pd.DataFrame) -> go.Figure:
-    chart_df = frame.copy()
-    chart_df["overall_pct"] = chart_df["overall_confidence"] * 100
-    chart_df["parity_pct"] = chart_df["confidence"] * 100
-    chart_df["llm_pct"] = chart_df["llm_confidence"] * 100
-    chart_df = chart_df.sort_values("overall_pct", ascending=True)
-    chart_df["rule_label"] = [
-        f"{rule} ({overall:.1f}%)"
-        for rule, overall in zip(chart_df["rule_name"], chart_df["overall_pct"])
-    ]
+def _to_pct(value: object) -> float:
+    try:
+        return round(float(value) * 100, 2)
+    except (TypeError, ValueError):
+        return 0.0
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Bar(
-            x=chart_df["parity_pct"],
-            y=chart_df["rule_label"],
-            orientation="h",
-            name="Parity confidence",
-            marker_color="rgba(29, 78, 216, 0.28)",
-            width=0.34,
-            hovertemplate=(
-                "<b>%{y}</b><br>"
-                "Parity: %{x:.2f}%<br>"
-                "<extra></extra>"
-            ),
-        )
-    )
-    fig.add_trace(
-        go.Bar(
-            x=chart_df["overall_pct"],
-            y=chart_df["rule_label"],
-            orientation="h",
-            name="Overall confidence",
-            marker_color=[STATUS_COLORS.get(status, "#64748b") for status in chart_df["status"]],
-            width=0.62,
-            hovertemplate=(
-                "<b>%{y}</b><br>"
-                "Overall: %{x:.2f}%<br>"
-                "<extra></extra>"
-            ),
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=chart_df["llm_pct"],
-            y=chart_df["rule_label"],
-            mode="markers",
-            name="LLM confidence",
-            marker=dict(color="#f59e0b", size=10, symbol="diamond", line=dict(color="#7c2d12", width=0.6)),
-            hovertemplate="<b>%{y}</b><br>LLM: %{x:.2f}%<extra></extra>",
-        )
+
+def _render_stat_chip(label: str, value: object) -> None:
+    st.markdown(
+        (
+            "<div class='stat-chip'>"
+            f"<div class='label'>{label}</div>"
+            f"<div class='value'>{value}</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
     )
 
+
+def _engine_summary_frame(per_engine_summary: Mapping[str, Mapping[str, object]]) -> pd.DataFrame:
+    rows: List[Dict[str, object]] = []
+    for engine in ("python", "dbt", "soda"):
+        summary = per_engine_summary.get(engine, {})
+        rows.append(
+            {
+                "engine": engine.upper(),
+                "rules": int(summary.get("rules", 0)),
+                "passed": int(summary.get("passed", 0)),
+                "avg_overall_confidence_pct": _to_pct(summary.get("avg_overall_confidence", 0.0)),
+                "avg_effective_confidence_pct": _to_pct(summary.get("avg_effective_confidence", 0.0)),
+                "avg_parity_ci_low_pct": _to_pct(summary.get("avg_parity_ci_lower", 0.0)),
+                "avg_equivalence_rate_pct": _to_pct(summary.get("avg_equivalence_rate", 0.0)),
+                "avg_mutation_score_pct": _to_pct(summary.get("avg_mutation_score", 0.0)),
+                "fallback_rules": int(summary.get("fallback_rules", 0)),
+                "real_llm_rules": int(summary.get("real_llm_rules", 0)) if engine == "python" else None,
+                "real_llm_rate_pct": _to_pct(summary.get("real_llm_rate", 0.0)) if engine == "python" else None,
+                "repairs_applied": int(summary.get("repairs_applied", 0)) if engine == "python" else None,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _rule_frame(rule_comparison: List[Mapping[str, object]]) -> pd.DataFrame:
+    rows: List[Dict[str, object]] = []
+    for item in rule_comparison:
+        engines = item.get("engines", {})
+        py = engines.get("python", {})
+        dbt = engines.get("dbt", {})
+        soda = engines.get("soda", {})
+        best_engine = str(item.get("best_engine", "python"))
+
+        effective_confidences = {
+            "python": float(py.get("effective_confidence", py.get("overall_confidence", 0.0))),
+            "dbt": float(dbt.get("effective_confidence", dbt.get("overall_confidence", 0.0))),
+            "soda": float(soda.get("effective_confidence", soda.get("overall_confidence", 0.0))),
+        }
+        sorted_conf = sorted(effective_confidences.values(), reverse=True)
+        margin = sorted_conf[0] - sorted_conf[1] if len(sorted_conf) > 1 else sorted_conf[0]
+        decision_scores = {
+            "python": float(py.get("decision_score", effective_confidences["python"])),
+            "dbt": float(dbt.get("decision_score", effective_confidences["dbt"])),
+            "soda": float(soda.get("decision_score", effective_confidences["soda"])),
+        }
+        sorted_scores = sorted(decision_scores.values(), reverse=True)
+        score_margin = sorted_scores[0] - sorted_scores[1] if len(sorted_scores) > 1 else sorted_scores[0]
+
+        rows.append(
+            {
+                "rule_name": item.get("rule_name", ""),
+                "severity": item.get("severity", ""),
+                "condition": item.get("condition", ""),
+                "condition_type": item.get("condition_type", "unknown"),
+                "complexity": item.get("complexity", "unknown"),
+                "declarative_friendly": bool(item.get("declarative_friendly", False)),
+                "products_tested": int(item.get("products_tested", 0)),
+                "best_engine": best_engine,
+                "best_effective_pct": _to_pct(effective_confidences.get(best_engine, 0.0)),
+                "effective_margin_pct": round(margin * 100, 2),
+                "best_decision_score": round(decision_scores.get(best_engine, 0.0), 4),
+                "decision_margin": round(score_margin, 4),
+                "python_status": py.get("status", "n/a"),
+                "dbt_status": dbt.get("status", "n/a"),
+                "soda_status": soda.get("status", "n/a"),
+                "python_effective_pct": _to_pct(py.get("effective_confidence", py.get("overall_confidence", 0.0))),
+                "dbt_effective_pct": _to_pct(dbt.get("effective_confidence", dbt.get("overall_confidence", 0.0))),
+                "soda_effective_pct": _to_pct(soda.get("effective_confidence", soda.get("overall_confidence", 0.0))),
+                "python_decision_score": round(decision_scores["python"], 4),
+                "dbt_decision_score": round(decision_scores["dbt"], 4),
+                "soda_decision_score": round(decision_scores["soda"], 4),
+                "python_overall_pct": _to_pct(py.get("overall_confidence", 0.0)),
+                "dbt_overall_pct": _to_pct(dbt.get("overall_confidence", 0.0)),
+                "soda_overall_pct": _to_pct(soda.get("overall_confidence", 0.0)),
+                "python_equivalence_pct": _to_pct(py.get("equivalence_match_rate", 1.0)),
+                "python_mutation_pct": _to_pct(py.get("mutation_score", 1.0)),
+                "python_verification_pct": _to_pct(py.get("verification_score", 1.0)),
+                "python_repair_applied": bool(py.get("counterexample_repair_applied", False)),
+                "python_mismatches": int(py.get("mismatches", 0)),
+                "dbt_mismatches": int(dbt.get("mismatches", 0)),
+                "soda_mismatches": int(soda.get("mismatches", 0)),
+                "python_real_llm": bool(py.get("real_llm_used", False)),
+                "python_provider": py.get("conversion_provider", ""),
+                "dbt_provider": dbt.get("conversion_provider", ""),
+                "soda_provider": soda.get("conversion_provider", ""),
+                "selection_reason": item.get("selection_reason", ""),
+                "declarative_tie_break_applied": bool(item.get("declarative_tie_break_applied", False)),
+                "recommendation": item.get("recommendation", ""),
+            }
+        )
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame
+    return frame.sort_values(by=["best_effective_pct", "rule_name"], ascending=[False, True]).reset_index(drop=True)
+
+
+def _build_effective_chart(frame: pd.DataFrame) -> go.Figure:
+    chart = frame[["rule_name", "python_effective_pct", "dbt_effective_pct", "soda_effective_pct"]].copy()
+    chart = chart.melt(id_vars=["rule_name"], var_name="engine", value_name="effective_pct")
+    chart["engine"] = chart["engine"].str.replace("_effective_pct", "", regex=False).str.upper()
+    fig = px.bar(
+        chart,
+        x="rule_name",
+        y="effective_pct",
+        color="engine",
+        barmode="group",
+        color_discrete_map={"PYTHON": ENGINE_COLORS["python"], "DBT": ENGINE_COLORS["dbt"], "SODA": ENGINE_COLORS["soda"]},
+    )
     fig.update_layout(
-        height=max(420, 56 * len(chart_df)),
-        margin=dict(l=40, r=70, t=30, b=32),
-        barmode="overlay",
-        xaxis=dict(title="Confidence (%)", range=[0, 105], gridcolor="#e2e8f0", ticksuffix="%"),
-        yaxis=dict(title=None),
+        height=460,
+        margin=dict(l=20, r=20, t=30, b=80),
+        xaxis=dict(title=None, tickangle=-30),
+        yaxis=dict(title="Effective confidence (%)", range=[0, 100]),
         legend=dict(orientation="h", y=1.08, x=0),
         plot_bgcolor="#ffffff",
         paper_bgcolor="#ffffff",
@@ -277,241 +248,373 @@ def _build_confidence_chart(frame: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def _build_status_chart(frame: pd.DataFrame) -> go.Figure:
-    status_df = frame["status"].value_counts().rename_axis("status").reset_index(name="count")
+def _build_best_engine_chart(frame: pd.DataFrame) -> go.Figure:
+    dist = frame["best_engine"].value_counts().rename_axis("engine").reset_index(name="rules")
     fig = px.pie(
-        status_df,
-        names="status",
-        values="count",
-        hole=0.62,
-        color="status",
-        color_discrete_map=STATUS_COLORS,
+        dist,
+        names="engine",
+        values="rules",
+        hole=0.58,
+        color="engine",
+        color_discrete_map=ENGINE_COLORS,
     )
-    fig.update_layout(
-        height=420,
-        margin=dict(l=5, r=5, t=20, b=5),
-        showlegend=True,
-        legend=dict(orientation="h", y=-0.1, x=0),
-    )
+    fig.update_layout(height=420, margin=dict(l=5, r=5, t=10, b=10), legend=dict(orientation="h", y=-0.1, x=0))
     fig.update_traces(textinfo="label+value")
     return fig
 
 
-def _build_table(frame: pd.DataFrame) -> pd.DataFrame:
-    table = frame.copy()
-    table["confidence"] = (table["confidence"] * 100).round(2)
-    table["parity_ci_lower"] = (table["parity_ci_lower"] * 100).round(2)
-    table["llm_confidence"] = (table["llm_confidence"] * 100).round(2)
-    table["overall_confidence"] = (table["overall_confidence"] * 100).round(2)
-    table["positive_agreement"] = (table["positive_agreement"] * 100).round(2)
-    table["positive_coverage"] = (table["positive_coverage"] * 100).round(2)
-    table["evidence_ci_lower"] = (table["evidence_ci_lower"] * 100).round(2)
-    table["evidence_posterior_mean"] = (table["evidence_posterior_mean"] * 100).round(2)
-    table = table.sort_values(by=["status", "overall_confidence"], ascending=[True, False])
-    return table
+def _complexity_summary_frame(per_complexity_summary: Mapping[str, Mapping[str, object]]) -> pd.DataFrame:
+    rows: List[Dict[str, object]] = []
+    for tier in ("simple", "medium", "intricate", "unknown"):
+        info = per_complexity_summary.get(tier)
+        if not info:
+            continue
+        rows.append(
+            {
+                "complexity": tier,
+                "rules": int(info.get("rules", 0)),
+                "python_wins": int(info.get("python_wins", 0)),
+                "dbt_wins": int(info.get("dbt_wins", 0)),
+                "soda_wins": int(info.get("soda_wins", 0)),
+                "avg_best_effective_pct": _to_pct(info.get("avg_best_effective_confidence", 0.0)),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _engine_detail_frame(selected_rule: Mapping[str, object]) -> pd.DataFrame:
+    rows: List[Dict[str, object]] = []
+    engines = selected_rule.get("engines", {})
+    for engine in ("python", "dbt", "soda"):
+        row = engines.get(engine, {})
+        rows.append(
+            {
+                "engine": engine.upper(),
+                "status": row.get("status", "n/a"),
+                "overall_confidence_pct": _to_pct(row.get("overall_confidence", 0.0)),
+                "effective_confidence_pct": _to_pct(row.get("effective_confidence", row.get("overall_confidence", 0.0))),
+                "decision_score": float(row.get("decision_score", row.get("effective_confidence", 0.0))),
+                "parity_ci_low_pct": _to_pct(row.get("parity_ci_lower", 0.0)),
+                "equivalence_pct": _to_pct(row.get("equivalence_match_rate", 1.0)),
+                "mutation_pct": _to_pct(row.get("mutation_score", 1.0)),
+                "verification_pct": _to_pct(row.get("verification_score", 1.0)),
+                "mismatches": int(row.get("mismatches", 0)),
+                "provider_factor_pct": _to_pct(row.get("provider_factor", 0.0)),
+                "provider": row.get("conversion_provider", ""),
+                "real_llm_used": bool(row.get("real_llm_used")) if engine == "python" else None,
+                "repair_applied": bool(row.get("counterexample_repair_applied", False)) if engine == "python" else None,
+                "artifact_lines": int(row.get("conversion_lines", 0)),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _engine_artifact(selected_rule: Mapping[str, object], engine: str) -> str:
+    return str(selected_rule.get("engines", {}).get(engine, {}).get("conversion_artifact", "")).strip()
+
+
+def _engine_failed_cases(selected_rule: Mapping[str, object], engine: str) -> List[Mapping[str, object]]:
+    return list(selected_rule.get("engines", {}).get(engine, {}).get("failed_test_cases", []))
+
+
+def _engine_equivalence_counterexamples(selected_rule: Mapping[str, object], engine: str) -> List[Mapping[str, object]]:
+    return list(selected_rule.get("engines", {}).get(engine, {}).get("equivalence_counterexamples", []))
 
 
 def main() -> None:
-    st.set_page_config(page_title="OFF Migration Dashboard", layout="wide")
+    st.set_page_config(page_title="OFF Migration Comparison Dashboard", layout="wide")
     _inject_theme()
     st.markdown(
         """
         <div class="hero">
-            <h1>Open Food Facts Migration Dashboard</h1>
-            <p>Rule-by-rule parity between legacy Perl checks and generated Python checks.</p>
+            <h1>Open Food Facts Migration Comparison Dashboard</h1>
+            <p>Compare Python (LLM), dbt, and Soda migrations for every rule, side-by-side.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
     with st.sidebar:
-        st.subheader("Pipeline")
+        st.subheader("Comparison Run")
         size = st.slider("Dataset size", min_value=100, max_value=500, value=300, step=25)
         default_mode = "OFF JSONL" if DEFAULT_SOURCE_JSONL.exists() else "Synthetic"
-        dataset_mode = st.radio(
-            "Dataset mode",
-            options=["OFF JSONL", "Synthetic"],
-            index=0 if default_mode == "OFF JSONL" else 1,
-            horizontal=False,
-            help="Choose OFF JSONL to read from file, or Synthetic to generate demo data.",
-        )
+        dataset_mode = st.radio("Dataset mode", options=["OFF JSONL", "Synthetic"], index=0 if default_mode == "OFF JSONL" else 1)
         use_off_source = dataset_mode == "OFF JSONL"
-        seed = st.number_input(
-            "Seed (synthetic mode)",
-            min_value=1,
-            max_value=99999,
-            value=17,
-            step=1,
-            disabled=use_off_source,
-            help="Used only when OFF source is disabled.",
-        )
-        if use_off_source:
-            st.caption("Seed is ignored while using OFF JSONL source.")
-        source_jsonl_text = st.text_input(
-            "Source JSONL path",
-            value=str(DEFAULT_SOURCE_JSONL),
-            disabled=not use_off_source,
-        )
+        seed = st.number_input("Seed (synthetic mode)", min_value=1, max_value=99999, value=17, disabled=use_off_source)
+        source_jsonl_text = st.text_input("Source JSONL path", value=str(DEFAULT_SOURCE_JSONL), disabled=not use_off_source)
         perl_rules_dir_text = st.text_input("Perl rules directory (optional)", value="")
-        llm_provider = st.selectbox("LLM provider", options=["groq", "openrouter", "simulated"], index=0)
+        llm_provider = "groq"
+        st.caption("Python engine uses Groq for LLM conversion in this dashboard.")
         llm_model = st.text_input("LLM model override", value="openai/gpt-oss-120b")
-        if st.button("Run Pipeline"):
-            with st.spinner("Running migration prototype..."):
-                run_pipeline(
-                    dataset_size=int(size),
-                    seed=int(seed),
-                    source_jsonl=Path(source_jsonl_text) if use_off_source else None,
-                    use_default_off_source=use_off_source,
-                    llm_provider=llm_provider,
-                    llm_model=llm_model.strip() or None,
-                    perl_rules_dir=Path(perl_rules_dir_text) if perl_rules_dir_text.strip() else None,
-                )
-            st.success("Pipeline completed.")
+        has_groq_key = bool(os.getenv("GROQ_API_KEY"))
+        if not has_groq_key:
+            st.warning("GROQ_API_KEY is not set. Python engine will fall back unless key is provided.")
 
-    payload = load_results()
+        if st.button("Run Full Comparison"):
+            try:
+                if not has_groq_key:
+                    raise RuntimeError("GROQ_API_KEY is required. Set it before running the comparison.")
+                with st.spinner("Running Python + dbt + Soda comparison..."):
+                    run_engine_comparison(
+                        dataset_size=int(size),
+                        seed=int(seed),
+                        source_jsonl=Path(source_jsonl_text) if use_off_source else None,
+                        use_default_off_source=use_off_source,
+                        llm_provider=llm_provider,
+                        llm_model=llm_model.strip() or None,
+                        perl_rules_dir=Path(perl_rules_dir_text) if perl_rules_dir_text.strip() else None,
+                        results_path=COMPARISON_PATH,
+                        require_real_llm=True,
+                    )
+                st.success("Comparison completed.")
+            except Exception as exc:  # noqa: BLE001
+                st.error(str(exc))
+
+    payload = load_report()
     if not payload:
-        st.info("No results yet. Click 'Run Pipeline' in the sidebar.")
+        st.info("No comparison report found yet. Click 'Run Full Comparison' in the sidebar.")
         return
 
-    summary = payload.get("migration_summary", {})
-    rule_results = payload.get("rule_results", [])
+    dataset = payload.get("dataset", {})
+    rule_comparison = list(payload.get("rule_comparison", []))
+    engine_summary = payload.get("per_engine_summary", {})
+    complexity_summary = payload.get("per_complexity_summary", {})
+    run_config = payload.get("run_config", {})
+    comparison_method = payload.get("comparison_method", {})
+    frame = _rule_frame(rule_comparison)
+    if frame.empty:
+        st.warning("Comparison report has no rule rows.")
+        return
 
-    col1, col2, col3, col4 = st.columns(4, gap="large")
-    col1.metric("Total rules", int(summary.get("total_rules", 0)))
-    col2.metric("Passed rules", int(summary.get("passed_rules", 0)))
-    col3.metric("Needs review", int(summary.get("rules_needing_review", 0)))
-    col4.metric("Avg confidence", f"{float(summary.get('average_overall_confidence', 0)):.2%}")
+    python_wins = int((frame["best_engine"] == "python").sum())
+    dbt_wins = int((frame["best_engine"] == "dbt").sum())
+    soda_wins = int((frame["best_engine"] == "soda").sum())
+    avg_best = frame["best_effective_pct"].mean()
+
+    m1, m2, m3, m4, m5 = st.columns(5, gap="large")
+    m1.metric("Rules compared", len(frame))
+    m2.metric("Python wins", python_wins)
+    m3.metric("dbt wins", dbt_wins)
+    m4.metric("Soda wins", soda_wins)
+    m5.metric("Avg best effective %", f"{avg_best:.2f}%")
 
     st.caption(f"Generated at: {payload.get('generated_at_utc', 'n/a')}")
-    st.caption(f"Dataset size: {payload.get('dataset', {}).get('products_tested', 'n/a')}")
-    st.caption(f"Dataset source: {payload.get('dataset', {}).get('source_jsonl', 'n/a')}")
-    st.caption(f"Perl rules source: {payload.get('dataset', {}).get('perl_rules_source', 'n/a')}")
+    st.caption(f"Dataset size: {dataset.get('products_tested', 'n/a')}")
+    st.caption(f"Dataset source: {dataset.get('source_jsonl', 'n/a')}")
+    st.caption(
+        "Confidence context: we compare engines using effective confidence "
+        "(overall confidence x provider factor), with status and mismatches prioritized."
+    )
+    if run_config:
+        st.caption(
+            f"LLM provider={run_config.get('llm_provider', 'n/a')} | "
+            f"GROQ key set={run_config.get('groq_api_key_set')} | "
+            f"Require real LLM={run_config.get('require_real_llm')}"
+        )
+    with st.expander("How best migration is chosen"):
+        st.markdown(
+            str(
+                comparison_method.get(
+                    "best_engine_ranking",
+                    "Prefer MATCH status, then fewer mismatches, then higher effective confidence.",
+                )
+            )
+        )
+        if comparison_method.get("hybrid_tie_break"):
+            st.markdown(str(comparison_method["hybrid_tie_break"]))
+        if comparison_method.get("declarative_tie_break"):
+            st.markdown(str(comparison_method["declarative_tie_break"]))
 
-    frame = _rule_dataframe(rule_results)
-    if frame.empty:
-        st.warning("No rule-level results found.")
-        return
-
-    st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
-    chart_left, chart_right = st.columns([0.7, 0.3], gap="large")
-    with chart_left:
-        st.subheader("Confidence by Rule")
-        st.caption("Thick bar = overall confidence, blue band = parity confidence, amber diamond = LLM confidence.")
-        st.plotly_chart(_build_confidence_chart(frame), use_container_width=True)
-    with chart_right:
-        st.subheader("Rule Status")
-        st.plotly_chart(_build_status_chart(frame), use_container_width=True)
-
-    st.subheader("Rule Validation Table")
-    table = _build_table(frame)
-    show_advanced_table = st.checkbox("Show advanced metrics columns", value=False)
-    if show_advanced_table:
-        visible_columns = [
-            "rule_name",
-            "severity",
-            "products_tested",
-            "perl_errors",
-            "python_errors",
-            "supporting_violations",
-            "positive_matches",
-            "positive_agreement",
-            "positive_coverage",
-            "parity_ci_lower",
-            "evidence_ci_lower",
-            "evidence_posterior_mean",
-            "confidence",
-            "llm_confidence",
-            "overall_confidence",
-            "mismatches",
-            "status",
-            "tag",
-        ]
-    else:
-        visible_columns = [
-            "rule_name",
-            "severity",
-            "products_tested",
-            "perl_errors",
-            "python_errors",
-            "mismatches",
-            "parity_ci_lower",
-            "llm_confidence",
-            "overall_confidence",
-            "status",
-        ]
-
+    st.subheader("Engine Summary")
+    summary_frame = _engine_summary_frame(engine_summary)
     st.dataframe(
-        table[visible_columns],
+        summary_frame,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "engine": st.column_config.TextColumn("Engine"),
+            "rules": st.column_config.NumberColumn("Rules", format="%d"),
+            "passed": st.column_config.NumberColumn("Passed", format="%d"),
+            "avg_overall_confidence_pct": st.column_config.NumberColumn("Avg overall %", format="%.2f"),
+            "avg_effective_confidence_pct": st.column_config.NumberColumn("Avg effective %", format="%.2f"),
+            "avg_parity_ci_low_pct": st.column_config.NumberColumn("Avg parity CI low %", format="%.2f"),
+            "avg_equivalence_rate_pct": st.column_config.NumberColumn("Avg equivalence %", format="%.2f"),
+            "avg_mutation_score_pct": st.column_config.NumberColumn("Avg mutation %", format="%.2f"),
+            "fallback_rules": st.column_config.NumberColumn("Fallback rules", format="%d"),
+            "real_llm_rules": st.column_config.NumberColumn("Real LLM rules", format="%d"),
+            "real_llm_rate_pct": st.column_config.NumberColumn("Real LLM rate %", format="%.2f"),
+            "repairs_applied": st.column_config.NumberColumn("Repairs applied", format="%d"),
+        },
+    )
+
+    complexity_frame = _complexity_summary_frame(complexity_summary)
+    if not complexity_frame.empty:
+        st.subheader("Mixed-Complexity Benchmark Summary")
+        st.dataframe(
+            complexity_frame,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "complexity": st.column_config.TextColumn("Complexity tier"),
+                "rules": st.column_config.NumberColumn("Rules", format="%d"),
+                "python_wins": st.column_config.NumberColumn("Python wins", format="%d"),
+                "dbt_wins": st.column_config.NumberColumn("dbt wins", format="%d"),
+                "soda_wins": st.column_config.NumberColumn("Soda wins", format="%d"),
+                "avg_best_effective_pct": st.column_config.NumberColumn("Avg best effective %", format="%.2f"),
+            },
+        )
+
+    left, right = st.columns([0.72, 0.28], gap="large")
+    with left:
+        st.subheader("Effective Confidence by Rule and Engine")
+        st.plotly_chart(_build_effective_chart(frame), use_container_width=True)
+    with right:
+        st.subheader("Best Engine Distribution")
+        st.plotly_chart(_build_best_engine_chart(frame), use_container_width=True)
+
+    st.subheader("Rule Validation Table (Comparison View)")
+    show_providers = st.checkbox("Show provider columns", value=False)
+    columns = [
+        "rule_name",
+        "complexity",
+        "condition_type",
+        "severity",
+        "best_engine",
+        "best_effective_pct",
+        "best_decision_score",
+        "effective_margin_pct",
+        "decision_margin",
+        "python_effective_pct",
+        "dbt_effective_pct",
+        "soda_effective_pct",
+        "python_equivalence_pct",
+        "python_mutation_pct",
+        "python_verification_pct",
+        "python_repair_applied",
+        "python_mismatches",
+        "dbt_mismatches",
+        "soda_mismatches",
+        "python_real_llm",
+        "declarative_tie_break_applied",
+        "selection_reason",
+        "recommendation",
+    ]
+    if show_providers:
+        columns.extend(["python_provider", "dbt_provider", "soda_provider"])
+    st.dataframe(
+        frame[columns],
         use_container_width=True,
         hide_index=True,
         column_config={
             "rule_name": st.column_config.TextColumn("Rule"),
+            "complexity": st.column_config.TextColumn("Complexity"),
+            "condition_type": st.column_config.TextColumn("Condition type"),
             "severity": st.column_config.TextColumn("Severity"),
-            "products_tested": st.column_config.NumberColumn("Products", format="%d"),
-            "perl_errors": st.column_config.NumberColumn("Perl violations", format="%d"),
-            "python_errors": st.column_config.NumberColumn("Python violations", format="%d"),
-            "mismatches": st.column_config.NumberColumn("Mismatches", format="%d"),
-            "supporting_violations": st.column_config.NumberColumn("Evidence count", format="%d"),
-            "positive_matches": st.column_config.NumberColumn("Positive matches", format="%d"),
-            "positive_agreement": st.column_config.NumberColumn("Positive agreement %", format="%.2f"),
-            "positive_coverage": st.column_config.NumberColumn("Coverage %", format="%.2f"),
-            "parity_ci_lower": st.column_config.NumberColumn("Parity CI low %", format="%.2f"),
-            "evidence_ci_lower": st.column_config.NumberColumn("Evidence CI low %", format="%.2f"),
-            "evidence_posterior_mean": st.column_config.NumberColumn("Evidence mean %", format="%.2f"),
-            "confidence": st.column_config.NumberColumn("Parity %", format="%.2f"),
-            "llm_confidence": st.column_config.NumberColumn("LLM %", format="%.2f"),
-            "overall_confidence": st.column_config.NumberColumn("Overall %", format="%.2f"),
-            "status": st.column_config.TextColumn("Status"),
-            "tag": st.column_config.TextColumn("Tag"),
+            "best_engine": st.column_config.TextColumn("Best migration"),
+            "best_effective_pct": st.column_config.NumberColumn("Best effective %", format="%.2f"),
+            "best_decision_score": st.column_config.NumberColumn("Best decision score", format="%.4f"),
+            "effective_margin_pct": st.column_config.NumberColumn("Win margin %", format="%.2f"),
+            "decision_margin": st.column_config.NumberColumn("Score margin", format="%.4f"),
+            "python_effective_pct": st.column_config.NumberColumn("Python effective %", format="%.2f"),
+            "dbt_effective_pct": st.column_config.NumberColumn("dbt effective %", format="%.2f"),
+            "soda_effective_pct": st.column_config.NumberColumn("Soda effective %", format="%.2f"),
+            "python_equivalence_pct": st.column_config.NumberColumn("Python equiv %", format="%.2f"),
+            "python_mutation_pct": st.column_config.NumberColumn("Python mutation %", format="%.2f"),
+            "python_verification_pct": st.column_config.NumberColumn("Python verify %", format="%.2f"),
+            "python_repair_applied": st.column_config.CheckboxColumn("Repair applied"),
+            "python_mismatches": st.column_config.NumberColumn("Python mismatches", format="%d"),
+            "dbt_mismatches": st.column_config.NumberColumn("dbt mismatches", format="%d"),
+            "soda_mismatches": st.column_config.NumberColumn("Soda mismatches", format="%d"),
+            "python_real_llm": st.column_config.CheckboxColumn("Python real LLM"),
+            "declarative_tie_break_applied": st.column_config.CheckboxColumn("dbt/soda tie-break"),
+            "selection_reason": st.column_config.TextColumn("Selection reason"),
+            "recommendation": st.column_config.TextColumn("Recommendation"),
+            "python_provider": st.column_config.TextColumn("Python provider"),
+            "dbt_provider": st.column_config.TextColumn("dbt provider"),
+            "soda_provider": st.column_config.TextColumn("Soda provider"),
         },
     )
 
     st.subheader("Rule Detail")
-    selected_rule_name = st.selectbox("Select rule", frame["rule_name"].tolist())
-    selected = next(item for item in rule_results if item["rule_name"] == selected_rule_name)
+    rule_names = [row.get("rule_name", "") for row in rule_comparison]
+    selected_rule_name = st.selectbox("Select rule", rule_names)
+    selected_rule = next(row for row in rule_comparison if row.get("rule_name") == selected_rule_name)
 
-    summary_cols = st.columns(5, gap="large")
-    summary_cols[0].metric("Status", selected.get("status", "n/a"))
-    summary_cols[1].metric("Parity %", f"{float(selected.get('confidence', 0)) * 100:.2f}")
-    summary_cols[2].metric("Parity CI low %", f"{float(selected.get('parity_ci_lower', 0)) * 100:.2f}")
-    summary_cols[3].metric("Overall %", f"{float(selected.get('overall_confidence', 0)) * 100:.2f}")
-    summary_cols[4].metric("Mismatches", int(selected.get("mismatches", 0)))
-    st.caption(f"Conversion provider: {selected.get('conversion_provider', 'n/a')}")
-    if selected.get("overall_method"):
-        st.caption(f"Scoring method: {selected.get('overall_method')}")
-    st.caption(
-        "Overall formula: LLM% x parity CI lower (95%) x evidence CI lower (95%, Beta posterior)."
+    d1, d2, d3, d4, d5 = st.columns(5, gap="medium")
+    with d1:
+        _render_stat_chip("Best migration", str(selected_rule.get("best_engine", "n/a")).upper())
+    with d2:
+        _render_stat_chip("Severity", str(selected_rule.get("severity", "n/a")))
+    with d3:
+        _render_stat_chip("Products tested", int(selected_rule.get("products_tested", 0)))
+    best_engine = str(selected_rule.get("best_engine", "python"))
+    best_effective = selected_rule.get("engines", {}).get(best_engine, {}).get("effective_confidence", 0.0)
+    with d4:
+        _render_stat_chip("Best effective %", f"{_to_pct(best_effective):.2f}")
+    detail_row = frame.loc[frame["rule_name"] == selected_rule_name].iloc[0]
+    with d5:
+        _render_stat_chip("Decision margin", f"{float(detail_row['decision_margin']):.4f}")
+
+    st.caption(f"Condition: {selected_rule.get('condition', 'n/a')}")
+    st.caption(f"Rule IR hash: {selected_rule.get('rule_ir_hash', 'n/a')}")
+    st.caption(f"Condition type: {selected_rule.get('condition_type', 'n/a')}")
+    st.caption(f"Complexity tier: {selected_rule.get('complexity', 'n/a')}")
+    st.caption(f"Declarative friendly: {selected_rule.get('declarative_friendly', 'n/a')}")
+    st.caption(f"Selection reason: {selected_rule.get('selection_reason', 'n/a')}")
+    st.caption(f"dbt/soda explicit tie-break applied: {selected_rule.get('declarative_tie_break_applied', False)}")
+    st.caption(f"Recommendation: {selected_rule.get('recommendation', 'n/a')}")
+
+    st.markdown("**Engine metrics for selected rule**")
+    st.dataframe(
+        _engine_detail_frame(selected_rule),
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "engine": st.column_config.TextColumn("Engine"),
+            "status": st.column_config.TextColumn("Status"),
+            "overall_confidence_pct": st.column_config.NumberColumn("Overall %", format="%.2f"),
+            "effective_confidence_pct": st.column_config.NumberColumn("Effective %", format="%.2f"),
+            "decision_score": st.column_config.NumberColumn("Decision score", format="%.4f"),
+            "parity_ci_low_pct": st.column_config.NumberColumn("Parity CI low %", format="%.2f"),
+            "equivalence_pct": st.column_config.NumberColumn("Equivalence %", format="%.2f"),
+            "mutation_pct": st.column_config.NumberColumn("Mutation %", format="%.2f"),
+            "verification_pct": st.column_config.NumberColumn("Verification %", format="%.2f"),
+            "mismatches": st.column_config.NumberColumn("Mismatches", format="%d"),
+            "provider_factor_pct": st.column_config.NumberColumn("Provider factor %", format="%.2f"),
+            "provider": st.column_config.TextColumn("Provider"),
+            "real_llm_used": st.column_config.CheckboxColumn("Real LLM used"),
+            "repair_applied": st.column_config.CheckboxColumn("Repair applied"),
+            "artifact_lines": st.column_config.NumberColumn("Artifact lines", format="%d"),
+        },
     )
 
-    tab_logic, tab_mismatch, tab_duckdb = st.tabs(["Logic", "Parity Mismatches", "DuckDB View"])
+    st.markdown("**All three migration artifacts for this rule**")
+    c1, c2, c3 = st.columns(3, gap="large")
+    with c1:
+        st.markdown("`PYTHON`")
+        st.code(_engine_artifact(selected_rule, "python"), language="python")
+    with c2:
+        st.markdown("`DBT`")
+        st.code(_engine_artifact(selected_rule, "dbt"), language="sql")
+    with c3:
+        st.markdown("`SODA`")
+        st.code(_engine_artifact(selected_rule, "soda"), language="yaml")
 
-    with tab_logic:
-        left, right = st.columns(2)
-        with left:
-            st.markdown("**Perl logic**")
-            st.code(selected["perl_logic"], language="perl")
-        with right:
-            st.markdown("**Generated Python conversion**")
-            st.code(selected["python_conversion"], language="python")
+    st.markdown("**Python Equivalence Counterexamples**")
+    python_counterexamples = _engine_equivalence_counterexamples(selected_rule, "python")
+    if python_counterexamples:
+        st.dataframe(pd.DataFrame(python_counterexamples), use_container_width=True, hide_index=True)
+    else:
+        st.success("No Python equivalence counterexamples.")
 
-    with tab_mismatch:
-        st.markdown("**Failed test cases (Perl vs Python mismatches)**")
-        failed_cases = selected.get("failed_test_cases", [])
+    st.markdown("**Parity mismatch samples by engine**")
+    for engine, title in [("python", "Python"), ("dbt", "dbt"), ("soda", "Soda")]:
+        st.markdown(f"`{title}`")
+        failed_cases = _engine_failed_cases(selected_rule, engine)
         if failed_cases:
             st.dataframe(pd.DataFrame(failed_cases), use_container_width=True, hide_index=True)
         else:
-            st.success("No mismatches for this rule.")
-
-    with tab_duckdb:
-        st.markdown("**DuckDB query**")
-        st.code(selected["duckdb_query"], language="sql")
-        st.markdown(f"DuckDB violations: `{selected['duckdb_errors']}`")
-        st.markdown("**Sample violating rows**")
-        duckdb_examples = selected.get("duckdb_example_rows", [])
-        if duckdb_examples:
-            st.dataframe(pd.DataFrame(duckdb_examples), use_container_width=True, hide_index=True)
-        else:
-            st.info("No violating rows in DuckDB for this rule.")
+            st.success(f"No mismatches for {title}.")
 
 
 if __name__ == "__main__":

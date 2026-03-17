@@ -1,5 +1,7 @@
-# RULE_NAME: saturated_fat_over_105g
+﻿# RULE_NAME: saturated_fat_over_105g
 # SEVERITY: warning
+# COMPLEXITY: simple
+# DECLARATIVE_FRIENDLY: yes
 if ($saturated_fat > 105) {
     push @{$product_ref->{$data_quality_tags}}, "saturated-fat-value-over-105g";
 }

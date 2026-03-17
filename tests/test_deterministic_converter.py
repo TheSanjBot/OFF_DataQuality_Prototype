@@ -17,8 +17,36 @@ def test_deterministic_conversion_behaves_like_expected_templates() -> None:
     assert sugars_tag == "sugars-value-over-105g"
     assert checks["sugars_over_105g"]({"sugars": 104.9}) is None
 
-    missing_tag = checks["missing_language_code"]({"language_code": "   "})
-    assert missing_tag == "missing-language-code"
-    assert checks["missing_language_code"]({"language_code": "en"}) is None
+    low_energy_tag = checks["energy_kj_mismatch_low"]({"energy_kj": 300.0, "energy_kcal": 100.0})
+    assert low_energy_tag == "energy-value-in-kcal-does-not-match-value-in-kj-low"
+    assert checks["energy_kj_mismatch_low"]({"energy_kj": 380.0, "energy_kcal": 100.0}) is None
+
+    high_energy_tag = checks["energy_kj_mismatch_high"]({"energy_kj": 500.0, "energy_kcal": 100.0})
+    assert high_energy_tag == "energy-value-in-kcal-does-not-match-value-in-kj-high"
+    assert checks["energy_kj_mismatch_high"]({"energy_kj": 450.0, "energy_kcal": 100.0}) is None
+
+    computed_low_tag = checks["energy_kj_computed_mismatch_low"]({"energy_kj_computed": 60.0, "energy_kj": 100.0})
+    assert computed_low_tag == "energy-value-in-kj-does-not-match-value-computed-from-other-nutrients-low"
+    assert checks["energy_kj_computed_mismatch_low"]({"energy_kj_computed": 80.0, "energy_kj": 100.0}) is None
+
+    computed_high_tag = checks["energy_kj_computed_mismatch_high"]({"energy_kj_computed": 150.0, "energy_kj": 100.0})
+    assert computed_high_tag == "energy-value-in-kj-does-not-match-value-computed-from-other-nutrients-high"
+    assert checks["energy_kj_computed_mismatch_high"]({"energy_kj_computed": 130.0, "energy_kj": 100.0}) is None
+
+    sugar_starch_tag = checks["sugars_plus_starch_vs_carbohydrates"](
+        {"sugars": 12.0, "starch": 8.2, "carbohydrates": 20.0}
+    )
+    assert sugar_starch_tag == "sugars-plus-starch-greater-than-carbohydrates"
+    assert (
+        checks["sugars_plus_starch_vs_carbohydrates"]({"sugars": 8.0, "starch": 6.0, "carbohydrates": 20.0}) is None
+    )
+
+    missing_lc_tag = checks["main_language_code_missing"]({"lc": "   "})
+    assert missing_lc_tag == "main-language-code-missing"
+    assert checks["main_language_code_missing"]({"lc": "en"}) is None
+
+    missing_lang_tag = checks["main_language_missing"]({"lang": ""})
+    assert missing_lang_tag == "main-language-missing"
+    assert checks["main_language_missing"]({"lang": "en"}) is None
 
     assert metadata["energy_kcal_vs_kj"]["provider"] == "simulated"

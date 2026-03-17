@@ -20,15 +20,17 @@ DEFAULT_OFF_JSONL = PROJECT_ROOT / "openfoodfacts-products.jsonl"
 CORE_FIELDS = [
     "product_id",
     "energy_kj",
+    "energy_kj_computed",
     "energy_kcal",
     "fat",
     "saturated_fat",
     "carbohydrates",
     "sugars",
+    "starch",
 ]
 
-# Additional field used for the simplified "missing language code" check.
-OPTIONAL_FIELDS = ["language_code"]
+# Additional fields used for OFF language-related checks.
+OPTIONAL_FIELDS = ["lc", "lang", "language_code"]
 
 
 @dataclass(frozen=True)
@@ -76,35 +78,69 @@ def _apply_deterministic_synthetic_scenarios(index: int, product: Dict[str, obje
     This keeps synthetic runs visually informative in the dashboard by ensuring
     each rule receives recurring, known-positive examples.
     """
-    bucket = index % 12
+    bucket = index % 15
 
     if bucket == 1:
         # energy_kcal > energy_kj
         energy_kj = float(product["energy_kj"])
         product["energy_kcal"] = round(energy_kj + rng.uniform(1.0, 50.0), 1)
     elif bucket == 2:
-        # sugars > carbohydrates
-        carbohydrates = float(product["carbohydrates"])
-        product["sugars"] = round(carbohydrates + rng.uniform(0.3, 12.0), 1)
+        # energy_kj < (3.7 * energy_kcal - 2)
+        energy_kcal = round(rng.uniform(80.0, 320.0), 1)
+        product["energy_kcal"] = energy_kcal
+        product["energy_kj"] = round((3.7 * energy_kcal) - rng.uniform(3.0, 30.0), 1)
     elif bucket == 3:
-        # saturated_fat > fat
-        fat = float(product["fat"])
-        product["saturated_fat"] = round(fat + rng.uniform(0.3, 10.0), 1)
+        # energy_kj > (4.7 * energy_kcal + 2)
+        energy_kcal = round(rng.uniform(80.0, 320.0), 1)
+        product["energy_kcal"] = energy_kcal
+        product["energy_kj"] = round((4.7 * energy_kcal) + rng.uniform(3.0, 30.0), 1)
     elif bucket == 4:
+        # energy_kj > 3911
+        product["energy_kj"] = round(rng.uniform(3912.0, 5200.0), 1)
+    elif bucket == 5:
+        # saturated_fat > (fat + 0.001)
+        fat = round(rng.uniform(10.0, 80.0), 3)
+        product["fat"] = fat
+        product["saturated_fat"] = round(fat + rng.uniform(0.01, 9.0), 3)
+    elif bucket == 6:
+        # sugars + starch > carbohydrates + 0.001
+        carbs = round(rng.uniform(10.0, 90.0), 3)
+        sugars = round(rng.uniform(3.0, 60.0), 3)
+        starch = round(max((carbs - sugars) + rng.uniform(0.01, 6.0), 0.0), 3)
+        product["carbohydrates"] = carbs
+        product["sugars"] = sugars
+        product["starch"] = starch
+    elif bucket == 7:
         # fat > 105
         product["fat"] = round(rng.uniform(106.0, 135.0), 1)
-    elif bucket == 5:
+    elif bucket == 8:
         # saturated_fat > 105
         product["saturated_fat"] = round(rng.uniform(106.0, 135.0), 1)
-    elif bucket == 6:
+    elif bucket == 9:
         # carbohydrates > 105
         product["carbohydrates"] = round(rng.uniform(106.0, 140.0), 1)
-    elif bucket == 7:
+    elif bucket == 10:
         # sugars > 105
         product["sugars"] = round(rng.uniform(106.0, 140.0), 1)
-    elif bucket == 8:
-        # missing language_code
+    elif bucket == 11:
+        # missing lc
+        product["lc"] = ""
         product["language_code"] = ""
+    elif bucket == 12:
+        # missing lang
+        product["lang"] = ""
+        if product.get("lc"):
+            product["language_code"] = str(product["lc"])
+        else:
+            product["language_code"] = ""
+    elif bucket == 13:
+        # energy_kj_computed < (0.7 * energy_kj - 5)
+        energy_kj = float(product["energy_kj"])
+        product["energy_kj_computed"] = round((0.7 * energy_kj) - rng.uniform(6.0, 25.0), 1)
+    elif bucket == 14:
+        # energy_kj_computed > (1.3 * energy_kj + 5)
+        energy_kj = float(product["energy_kj"])
+        product["energy_kj_computed"] = round((1.3 * energy_kj) + rng.uniform(6.0, 25.0), 1)
 
 
 def generate_product(index: int, rng: random.Random) -> Dict[str, object]:
@@ -116,22 +152,35 @@ def generate_product(index: int, rng: random.Random) -> Dict[str, object]:
     saturated_fat = round(rng.uniform(0.0, fat), 1)
     carbohydrates = round(rng.uniform(0.0, 100.0), 1)
     sugars = round(rng.uniform(0.0, carbohydrates), 1)
+    starch = round(rng.uniform(0.0, max(carbohydrates - sugars, 0.0)), 1)
 
     if _maybe(0.10, rng):
         energy_kcal = energy_kj + rng.randint(1, 100)
-    if _maybe(0.09, rng):
-        sugars = round(carbohydrates + rng.uniform(0.1, 25.0), 1)
+    if _maybe(0.07, rng):
+        energy_kj = round((3.7 * energy_kcal) - rng.uniform(3.0, 30.0), 1)
+    if _maybe(0.07, rng):
+        energy_kj = round((4.7 * energy_kcal) + rng.uniform(3.0, 30.0), 1)
     if _maybe(0.08, rng):
         saturated_fat = round(fat + rng.uniform(0.1, 20.0), 1)
+    if _maybe(0.07, rng):
+        starch = round(max((carbohydrates - sugars) + rng.uniform(0.01, 6.0), 0.0), 1)
+
+    energy_kj_computed = round(float(energy_kj) * rng.uniform(0.92, 1.08), 1)
+    if _maybe(0.06, rng):
+        energy_kj_computed = round((0.65 * float(energy_kj)) - rng.uniform(1.0, 8.0), 1)
+    if _maybe(0.06, rng):
+        energy_kj_computed = round((1.35 * float(energy_kj)) + rng.uniform(1.0, 8.0), 1)
 
     product: Dict[str, object] = {
         "product_id": f"{index:013d}",
         "energy_kj": energy_kj,
+        "energy_kj_computed": energy_kj_computed,
         "energy_kcal": energy_kcal,
         "fat": fat,
         "saturated_fat": saturated_fat,
         "carbohydrates": carbohydrates,
         "sugars": sugars,
+        "starch": starch,
     }
 
     for nutrient in ("fat", "saturated_fat", "carbohydrates", "sugars"):
@@ -143,7 +192,14 @@ def generate_product(index: int, rng: random.Random) -> Dict[str, object]:
         weights=[0.55, 0.1, 0.08, 0.06, 0.06, 0.08, 0.07],
         k=1,
     )[0]
-    product["language_code"] = language_code
+    lang_value = rng.choices(
+        ["en", "fr", "es", "de", "it", "xx", "", None],
+        weights=[0.5, 0.1, 0.08, 0.06, 0.06, 0.03, 0.09, 0.08],
+        k=1,
+    )[0]
+    product["lc"] = language_code
+    product["lang"] = lang_value
+    product["language_code"] = language_code or lang_value
     _apply_deterministic_synthetic_scenarios(index=index, product=product, rng=rng)
     return product
 
@@ -176,20 +232,32 @@ def extract_product_from_off_record(record: Mapping[str, object]) -> Dict[str, o
         nutriments.get("energy-kcal_value"),
         nutriments.get("energy-kcal_value_computed"),
     )
+    energy_kj_computed = _first_number(
+        nutriments.get("energy-kj_value_computed"),
+        nutriments.get("energy-kj_value-computed"),
+        nutriments.get("energy-kj_computed"),
+    )
     fat = _first_number(nutriments.get("fat_100g"), nutriments.get("fat"))
     saturated_fat = _first_number(nutriments.get("saturated-fat_100g"), nutriments.get("saturated-fat"))
     carbohydrates = _first_number(nutriments.get("carbohydrates_100g"), nutriments.get("carbohydrates"))
     sugars = _first_number(nutriments.get("sugars_100g"), nutriments.get("sugars"))
-    language_code = record.get("lc") or record.get("lang")
+    starch = _first_number(nutriments.get("starch_100g"), nutriments.get("starch"))
+    lc = record.get("lc")
+    lang = record.get("lang")
+    language_code = lc or lang
 
     return {
         "product_id": product_id,
         "energy_kj": energy_kj,
+        "energy_kj_computed": energy_kj_computed,
         "energy_kcal": energy_kcal,
         "fat": fat,
         "saturated_fat": saturated_fat,
         "carbohydrates": carbohydrates,
         "sugars": sugars,
+        "starch": starch,
+        "lc": lc,
+        "lang": lang,
         "language_code": language_code,
     }
 

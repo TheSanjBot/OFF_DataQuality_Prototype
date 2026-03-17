@@ -13,6 +13,8 @@ venv/
 off_quality.db
 openfoodfacts-products.jsonl
 data/sample_products.jsonl
+results/declarative_runtime/
+results/tmp_engine_runs/
 
 # OS/editor
 .DS_Store

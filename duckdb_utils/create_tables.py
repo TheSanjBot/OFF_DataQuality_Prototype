@@ -13,11 +13,15 @@ SCHEMA_SQL = f"""
 CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
     product_id TEXT,
     energy_kj DOUBLE,
+    energy_kj_computed DOUBLE,
     energy_kcal DOUBLE,
     fat DOUBLE,
     saturated_fat DOUBLE,
     carbohydrates DOUBLE,
     sugars DOUBLE,
+    starch DOUBLE,
+    lc TEXT,
+    lang TEXT,
     language_code TEXT
 )
 """
@@ -43,11 +47,15 @@ def load_jsonl_to_duckdb(jsonl_path: Path, db_path: Path = DB_PATH) -> None:
             SELECT
                 product_id,
                 energy_kj,
+                energy_kj_computed,
                 energy_kcal,
                 fat,
                 saturated_fat,
                 carbohydrates,
                 sugars,
+                starch,
+                lc,
+                lang,
                 language_code
             FROM read_json_auto(?)
             """,

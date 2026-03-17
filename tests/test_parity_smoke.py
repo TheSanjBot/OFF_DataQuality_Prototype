@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import validation.parity_validator as parity_validator
+from perl_checks.legacy_checks import load_rule_snippets_from_directory
 
 
 def test_parity_pipeline_smoke_simulated(tmp_path, monkeypatch) -> None:
@@ -20,9 +21,10 @@ def test_parity_pipeline_smoke_simulated(tmp_path, monkeypatch) -> None:
     )
 
     summary = payload["migration_summary"]
+    expected_rules = len(load_rule_snippets_from_directory(perl_rules_dir))
     assert results_path.exists()
-    assert summary["total_rules"] == 8
-    assert summary["passed_rules"] == 8
+    assert summary["total_rules"] == expected_rules
+    assert summary["passed_rules"] == expected_rules
     assert summary["rules_needing_review"] == 0
     first_rule = payload["rule_results"][0]
     assert "parity_ci_lower" in first_rule

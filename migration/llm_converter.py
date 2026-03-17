@@ -6,8 +6,6 @@ import os
 import re
 from dataclasses import asdict, dataclass
 from typing import Dict, List, Sequence
-from urllib import error as urlerror
-from urllib import request as urlrequest
 
 
 @dataclass(frozen=True)
@@ -47,6 +45,14 @@ def _confidence_for_rule(rule: Dict[str, object]) -> float:
         return 0.96
     if condition_type == "missing_field":
         return 0.93
+    if condition_type == "sum_fields_comparison":
+        return 0.91
+    if condition_type == "compound_threshold_and":
+        return 0.90
+    if condition_type == "affine_field_comparison":
+        return 0.89
+    if condition_type == "scaled_field_comparison":
+        return 0.88
     return 0.80
 
 
@@ -95,6 +101,93 @@ def _build_python_code(rule: Dict[str, object], function_name: str) -> str:
     return None
 """
 
+    if condition_type == "scaled_field_comparison":
+        left = str(rule["left_operand"])
+        right = str(rule["right_operand"])
+        operator = str(rule["operator"])
+        factor = float(rule["scale_factor"])
+        return f"""def {function_name}(product):
+    left_raw = product.get({left!r})
+    right_raw = product.get({right!r})
+    try:
+        left_value = float(left_raw)
+        right_value = float(right_raw)
+    except (TypeError, ValueError):
+        return None
+    scaled_value = right_value * {factor}
+    if left_value {operator} scaled_value:
+        return {tag_literal}
+    return None
+"""
+
+    if condition_type == "compound_threshold_and":
+        clauses = list(rule.get("clauses", []))
+        lines = [
+            f"def {function_name}(product):",
+            "    try:",
+        ]
+        for idx, clause in enumerate(clauses):
+            field = str(clause["left_operand"])
+            lines.append(f"        value_{idx} = float(product.get({field!r}))")
+        lines.append("    except (TypeError, ValueError):")
+        lines.append("        return None")
+        checks: List[str] = []
+        for idx, clause in enumerate(clauses):
+            operator = str(clause["operator"])
+            threshold = float(clause["right_operand"])
+            checks.append(f"(value_{idx} {operator} {threshold})")
+        joined = " and ".join(checks) if checks else "False"
+        lines.append(f"    if {joined}:")
+        lines.append(f"        return {tag_literal}")
+        lines.append("    return None")
+        return "\n".join(lines) + "\n"
+
+    if condition_type == "affine_field_comparison":
+        left = str(rule["left_operand"])
+        right = str(rule["right_operand"])
+        operator = str(rule["operator"])
+        factor = float(rule["scale_factor"])
+        offset = float(rule["offset"])
+        return f"""def {function_name}(product):
+    left_raw = product.get({left!r})
+    right_raw = product.get({right!r})
+    try:
+        left_value = float(left_raw)
+        right_value = float(right_raw)
+    except (TypeError, ValueError):
+        return None
+    target = ({factor} * right_value) + ({offset})
+    if left_value {operator} target:
+        return {tag_literal}
+    return None
+"""
+
+    if condition_type == "sum_fields_comparison":
+        left_operands = list(rule.get("left_operands", []))
+        if len(left_operands) != 2:
+            raise ValueError("sum_fields_comparison requires exactly two left_operands.")
+        left_a = str(left_operands[0])
+        left_b = str(left_operands[1])
+        right = str(rule["right_operand"])
+        operator = str(rule["operator"])
+        right_offset = float(rule["right_offset"])
+        return f"""def {function_name}(product):
+    left_a_raw = product.get({left_a!r})
+    left_b_raw = product.get({left_b!r})
+    right_raw = product.get({right!r})
+    try:
+        left_a_value = float(left_a_raw)
+        left_b_value = float(left_b_raw)
+        right_value = float(right_raw)
+    except (TypeError, ValueError):
+        return None
+    left_sum = left_a_value + left_b_value
+    right_target = right_value + ({right_offset})
+    if left_sum {operator} right_target:
+        return {tag_literal}
+    return None
+"""
+
     raise ValueError(f"Unsupported condition type: {condition_type}")
 
 
@@ -116,6 +209,7 @@ def _validate_generated_code(code: str, function_name: str) -> None:
         {},
         {
             "energy_kj": None,
+            "energy_kj_computed": None,
             "energy_kcal": 100.0,
             "fat": None,
             "saturated_fat": None,
@@ -125,6 +219,7 @@ def _validate_generated_code(code: str, function_name: str) -> None:
         },
         {
             "energy_kj": 100.0,
+            "energy_kj_computed": 100.0,
             "energy_kcal": 10.0,
             "fat": 10.0,
             "saturated_fat": 2.0,
@@ -210,6 +305,127 @@ def _semantic_test_cases(rule: Dict[str, object]) -> List[tuple[Dict[str, object
             ({field: "en"}, None, "missing_present"),
         ]
 
+    if condition_type == "scaled_field_comparison":
+        left = str(rule["left_operand"])
+        right = str(rule["right_operand"])
+        operator_token = str(rule["operator"])
+        factor = float(rule["scale_factor"])
+        true_right = 10.0
+        scaled = true_right * factor
+        if operator_token == ">":
+            true_left, false_left = scaled + 1.0, scaled - 1.0
+        elif operator_token == ">=":
+            true_left, false_left = scaled, scaled - 1.0
+        elif operator_token == "<":
+            true_left, false_left = scaled - 1.0, scaled + 1.0
+        elif operator_token == "<=":
+            true_left, false_left = scaled, scaled + 1.0
+        elif operator_token == "==":
+            true_left, false_left = scaled, scaled + 1.0
+        elif operator_token == "!=":
+            true_left, false_left = scaled + 1.0, scaled
+        else:
+            raise ValueError(f"Unsupported scaled comparison operator: {operator_token}")
+        return [
+            ({left: true_left, right: true_right}, tag, "scaled_true"),
+            ({left: false_left, right: true_right}, None, "scaled_false"),
+            ({left: None, right: true_right}, None, "scaled_missing_left"),
+            ({left: true_left, right: None}, None, "scaled_missing_right"),
+            ({left: "nan_text", right: true_right}, None, "scaled_non_numeric"),
+        ]
+
+    if condition_type == "affine_field_comparison":
+        left = str(rule["left_operand"])
+        right = str(rule["right_operand"])
+        operator_token = str(rule["operator"])
+        factor = float(rule["scale_factor"])
+        offset = float(rule["offset"])
+        true_right = 10.0
+        target = (factor * true_right) + offset
+        if operator_token == ">":
+            true_left, false_left = target + 1.0, target - 1.0
+        elif operator_token == ">=":
+            true_left, false_left = target, target - 1.0
+        elif operator_token == "<":
+            true_left, false_left = target - 1.0, target + 1.0
+        elif operator_token == "<=":
+            true_left, false_left = target, target + 1.0
+        elif operator_token == "==":
+            true_left, false_left = target, target + 1.0
+        elif operator_token == "!=":
+            true_left, false_left = target + 1.0, target
+        else:
+            raise ValueError(f"Unsupported affine comparison operator: {operator_token}")
+        return [
+            ({left: true_left, right: true_right}, tag, "affine_true"),
+            ({left: false_left, right: true_right}, None, "affine_false"),
+            ({left: None, right: true_right}, None, "affine_missing_left"),
+            ({left: true_left, right: None}, None, "affine_missing_right"),
+            ({left: "nan_text", right: true_right}, None, "affine_non_numeric"),
+        ]
+
+    if condition_type == "sum_fields_comparison":
+        left_operands = list(rule.get("left_operands", []))
+        if len(left_operands) != 2:
+            raise ValueError("sum_fields_comparison rule must define two left operands.")
+        left_a = str(left_operands[0])
+        left_b = str(left_operands[1])
+        right = str(rule["right_operand"])
+        operator_token = str(rule["operator"])
+        right_offset = float(rule["right_offset"])
+        right_value = 20.0
+        target = right_value + right_offset
+        if operator_token == ">":
+            true_sum, false_sum = target + 1.0, target - 1.0
+        elif operator_token == ">=":
+            true_sum, false_sum = target, target - 1.0
+        elif operator_token == "<":
+            true_sum, false_sum = target - 1.0, target + 1.0
+        elif operator_token == "<=":
+            true_sum, false_sum = target, target + 1.0
+        elif operator_token == "==":
+            true_sum, false_sum = target, target + 1.0
+        elif operator_token == "!=":
+            true_sum, false_sum = target + 1.0, target
+        else:
+            raise ValueError(f"Unsupported sum comparison operator: {operator_token}")
+
+        true_a = true_sum / 2.0
+        true_b = true_sum - true_a
+        false_a = false_sum / 2.0
+        false_b = false_sum - false_a
+        return [
+            ({left_a: true_a, left_b: true_b, right: right_value}, tag, "sum_true"),
+            ({left_a: false_a, left_b: false_b, right: right_value}, None, "sum_false"),
+            ({left_a: None, left_b: true_b, right: right_value}, None, "sum_missing_left_a"),
+            ({left_a: true_a, left_b: None, right: right_value}, None, "sum_missing_left_b"),
+            ({left_a: true_a, left_b: true_b, right: None}, None, "sum_missing_right"),
+        ]
+
+    if condition_type == "compound_threshold_and":
+        clauses = list(rule.get("clauses", []))
+        if not clauses:
+            raise ValueError("compound_threshold_and rule must define clauses.")
+        true_product: Dict[str, object] = {}
+        false_product: Dict[str, object] = {}
+        missing_product: Dict[str, object] = {}
+        for idx, clause in enumerate(clauses):
+            field = str(clause["left_operand"])
+            operator_token = str(clause["operator"])
+            threshold = float(clause["right_operand"])
+            true_value, false_value = _threshold_truth_values(operator_token, threshold)
+            true_product[field] = true_value
+            false_product[field] = true_value
+            missing_product[field] = true_value
+            if idx == 0:
+                false_product[field] = false_value
+                missing_product[field] = None
+        return [
+            (true_product, tag, "compound_true"),
+            (false_product, None, "compound_false"),
+            (missing_product, None, "compound_missing"),
+        ]
+
     raise ValueError(f"Unsupported condition type for semantic checks: {condition_type}")
 
 
@@ -248,9 +464,17 @@ def _build_llm_prompt(rule: Dict[str, object], function_name: str) -> str:
         "rule_name": rule["rule_name"],
         "tag": rule["tag"],
         "condition_type": rule["condition_type"],
-        "left_operand": rule["left_operand"],
-        "operator": rule["operator"],
-        "right_operand": rule["right_operand"],
+        "condition": rule.get("condition"),
+        "duckdb_condition": rule.get("duckdb_condition"),
+        "left_operand": rule.get("left_operand"),
+        "left_operands": rule.get("left_operands"),
+        "operator": rule.get("operator"),
+        "right_operand": rule.get("right_operand"),
+        "scale_factor": rule.get("scale_factor"),
+        "offset": rule.get("offset"),
+        "right_offset": rule.get("right_offset"),
+        "clauses": rule.get("clauses"),
+        "complexity": rule.get("complexity"),
     }
     examples: List[Dict[str, object]] = []
     for product, expected, case_name in _semantic_test_cases(rule):
@@ -285,68 +509,6 @@ def _build_llm_repair_prompt(
         f"Previous code:\n{previous_code}\n\n"
         f"{_build_llm_prompt(rule, function_name)}"
     )
-
-
-def _parse_chat_response(body: str) -> str:
-    parsed = json.loads(body)
-    choices = parsed.get("choices", [])
-    if not choices:
-        raise RuntimeError("No choices returned from LLM response.")
-    message = choices[0].get("message", {})
-    content = message.get("content", "")
-    if isinstance(content, list):
-        text_parts: List[str] = []
-        for chunk in content:
-            if isinstance(chunk, dict):
-                text_parts.append(str(chunk.get("text", "")))
-            else:
-                text_parts.append(str(chunk))
-        content = "".join(text_parts)
-    if not isinstance(content, str):
-        content = str(content)
-    return _extract_code_block(content)
-
-
-def _call_openrouter(
-    rule: Dict[str, object],
-    function_name: str,
-    model: str,
-    prompt: str | None = None,
-) -> str:
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENROUTER_API_KEY is not set.")
-
-    endpoint = os.getenv("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1/chat/completions")
-    model_name = model
-    app_title = os.getenv("OPENROUTER_APP_TITLE", "off-quality-migration-prototype")
-    app_url = os.getenv("OPENROUTER_APP_URL", "http://localhost")
-
-    payload = {
-        "model": model_name,
-        "messages": [
-            {"role": "system", "content": "You are a strict Python code generator for data quality rules."},
-            {"role": "user", "content": prompt or _build_llm_prompt(rule, function_name)},
-        ],
-        "temperature": 0.0,
-    }
-
-    req = urlrequest.Request(
-        endpoint,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "HTTP-Referer": app_url,
-            "X-Title": app_title,
-        },
-        method="POST",
-    )
-
-    with urlrequest.urlopen(req, timeout=90) as response:
-        body = response.read().decode("utf-8")
-    return _parse_chat_response(body)
 
 
 def _call_groq(
@@ -407,8 +569,6 @@ def convert_rule_to_python(
             ValueError,
             TypeError,
             json.JSONDecodeError,
-            urlerror.URLError,
-            urlerror.HTTPError,
             TimeoutError,
         ) as exc:
             repair_exc: Exception | None = None
@@ -435,8 +595,6 @@ def convert_rule_to_python(
                 ValueError,
                 TypeError,
                 json.JSONDecodeError,
-                urlerror.URLError,
-                urlerror.HTTPError,
                 TimeoutError,
             ) as second_exc:
                 repair_exc = second_exc
@@ -459,103 +617,9 @@ def convert_rule_to_python(
                 )
                 provider_used = "simulated_fallback"
                 confidence = max(0.70, confidence - 0.05)
-    elif provider == "openrouter":
-        strict_llm = os.getenv("LLM_STRICT", "0").strip().lower() in {"1", "true", "yes", "on"}
-        primary_model = model or os.getenv("OPENROUTER_MODEL", "arcee-ai/trinity-large-preview:free")
-        fallback_model = os.getenv("OPENROUTER_FALLBACK_MODEL", "")
-        model_candidates = [primary_model]
-        if fallback_model and fallback_model != primary_model:
-            model_candidates.append(fallback_model)
-
-        errors: List[str] = []
-        generated_code: str | None = None
-        chosen_model: str | None = None
-        used_fallback_model = False
-
-        for idx, candidate_model in enumerate(model_candidates):
-            first_attempt_code = ""
-            try:
-                candidate_code = _call_openrouter(rule, function_name=function_name, model=candidate_model)
-                first_attempt_code = candidate_code
-                candidate_code = _normalize_function_name(candidate_code, function_name=function_name)
-                _validate_generated_code(candidate_code, function_name=function_name)
-                _validate_generated_semantics(candidate_code, function_name=function_name, rule=rule)
-                generated_code = candidate_code
-                chosen_model = candidate_model
-                used_fallback_model = idx > 0
-                break
-            except (
-                RuntimeError,
-                ValueError,
-                TypeError,
-                json.JSONDecodeError,
-                urlerror.URLError,
-                urlerror.HTTPError,
-                TimeoutError,
-            ) as exc:
-                try:
-                    repair_prompt = _build_llm_repair_prompt(
-                        rule=rule,
-                        function_name=function_name,
-                        previous_code=first_attempt_code or "# no usable code returned in first attempt",
-                        error_message=f"{exc.__class__.__name__}: {exc}",
-                    )
-                    candidate_code = _call_openrouter(
-                        rule,
-                        function_name=function_name,
-                        model=candidate_model,
-                        prompt=repair_prompt,
-                    )
-                    candidate_code = _normalize_function_name(candidate_code, function_name=function_name)
-                    _validate_generated_code(candidate_code, function_name=function_name)
-                    _validate_generated_semantics(candidate_code, function_name=function_name, rule=rule)
-                    generated_code = candidate_code
-                    chosen_model = candidate_model
-                    used_fallback_model = idx > 0
-                    break
-                except (
-                    RuntimeError,
-                    ValueError,
-                    TypeError,
-                    json.JSONDecodeError,
-                    urlerror.URLError,
-                    urlerror.HTTPError,
-                    TimeoutError,
-                ) as second_exc:
-                    errors.append(
-                        f"{candidate_model}: first={exc.__class__.__name__}: {exc}; "
-                        f"retry={second_exc.__class__.__name__}: {second_exc}"
-                    )
-
-        if generated_code is not None:
-            python_code = generated_code
-            if used_fallback_model:
-                provider_used = "openrouter_model_fallback"
-                notes = (
-                    f"Primary model failed; converted via OpenRouter fallback model ({chosen_model}). "
-                    f"Primary error: {errors[0]}"
-                )
-                confidence = min(0.99, confidence)
-            else:
-                notes = f"Converted via OpenRouter ({chosen_model})."
-                confidence = min(0.99, confidence + 0.01)
-        else:
-            error_summary = " | ".join(errors) if errors else "No OpenRouter attempt was made."
-            if strict_llm:
-                raise RuntimeError(
-                    f"OpenRouter conversion failed and LLM_STRICT=1 is enabled. "
-                    f"Errors: {error_summary}"
-                )
-            python_code = _build_python_code(rule, function_name=function_name)
-            _validate_generated_code(python_code, function_name=function_name)
-            _validate_generated_semantics(python_code, function_name=function_name, rule=rule)
-            notes = (
-                f"OpenRouter conversion failed ({error_summary}). "
-                "Fell back to deterministic converter."
-            )
-            provider_used = "simulated_fallback"
-            confidence = max(0.70, confidence - 0.05)
     else:
+        if provider not in {"simulated", "simulated_fallback"}:
+            provider_used = "simulated_fallback"
         python_code = _build_python_code(rule, function_name=function_name)
         _validate_generated_code(python_code, function_name=function_name)
         _validate_generated_semantics(python_code, function_name=function_name, rule=rule)
@@ -569,6 +633,62 @@ def convert_rule_to_python(
         conversion_notes=notes,
         provider=provider_used,
     )
+
+
+def _build_counterexample_repair_prompt(
+    rule: Dict[str, object],
+    function_name: str,
+    previous_code: str,
+    counterexamples: Sequence[Dict[str, object]],
+) -> str:
+    limited = list(counterexamples)[:5]
+    return (
+        "Your previous code fails equivalence against legacy Perl behavior.\n"
+        "Fix the function using these concrete failing examples.\n"
+        "Return only Python code.\n"
+        f"Function name must remain: {function_name}\n"
+        f"Counterexamples: {json.dumps(limited)}\n"
+        f"Previous code:\n{previous_code}\n\n"
+        f"{_build_llm_prompt(rule, function_name)}"
+    )
+
+
+def repair_conversion_with_counterexamples(
+    rule: Dict[str, object],
+    converted_rule: Dict[str, object],
+    counterexamples: Sequence[Dict[str, object]],
+    provider: str = "groq",
+    model: str | None = None,
+) -> Dict[str, object]:
+    """Attempt counterexample-driven repair for an already converted rule."""
+    if provider != "groq":
+        return dict(converted_rule)
+    if not counterexamples:
+        return dict(converted_rule)
+
+    function_name = str(converted_rule["function_name"])
+    previous_code = str(converted_rule["python_code"])
+    chosen_model = model or os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    repair_prompt = _build_counterexample_repair_prompt(
+        rule=rule,
+        function_name=function_name,
+        previous_code=previous_code,
+        counterexamples=counterexamples,
+    )
+    repaired_code = _call_groq(rule, function_name=function_name, model=chosen_model, prompt=repair_prompt)
+    repaired_code = _normalize_function_name(repaired_code, function_name=function_name)
+    _validate_generated_code(repaired_code, function_name=function_name)
+    _validate_generated_semantics(repaired_code, function_name=function_name, rule=rule)
+
+    repaired = dict(converted_rule)
+    repaired["python_code"] = repaired_code
+    repaired["provider"] = "groq"
+    repaired["llm_confidence"] = min(0.99, float(converted_rule.get("llm_confidence", 0.9)) + 0.01)
+    repaired["conversion_notes"] = (
+        f"{converted_rule.get('conversion_notes', '')} "
+        "Counterexample-driven Groq repair applied."
+    ).strip()
+    return repaired
 
 
 def convert_rules(

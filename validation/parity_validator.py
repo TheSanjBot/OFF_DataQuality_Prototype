@@ -9,6 +9,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Dict, List, Mapping, Sequence, Set
 
+from declarative.check_runners import run_declarative_checks
 from data.load_dataset import (
     DB_PATH,
     DEFAULT_OFF_JSONL,
@@ -17,9 +18,10 @@ from data.load_dataset import (
 )
 from duckdb_utils.create_tables import count_violations, sample_violations
 from extractor.perl_logic_extractor import extract_rules
-from migration.llm_converter import convert_rules
-from perl_checks.legacy_checks import LEGACY_RULES, get_perl_rule_snippets, run_perl_checks
+from migration.llm_converter import convert_rules, repair_conversion_with_counterexamples
+from perl_checks.legacy_checks import LEGACY_RULES, get_legacy_rule_map, get_perl_rule_snippets, run_perl_checks
 from python_checks.generated_checks import compile_generated_checks
+from validation.verification import run_rule_verification
 
 RESULT_PATH = Path(__file__).resolve().parent.parent / "results" / "migration_results.json"
 TABLE_NAME = "nutrition_table"
@@ -143,6 +145,44 @@ def _run_python_checks(
     }
 
 
+def _run_python_verification(
+    structured_rules: Sequence[Dict[str, object]],
+    python_checks: Mapping[str, object],
+    conversion_metadata: Mapping[str, Mapping[str, object]],
+    seed: int,
+) -> Dict[str, Dict[str, object]]:
+    legacy_map = get_legacy_rule_map(LEGACY_RULES)
+    verification_by_rule: Dict[str, Dict[str, object]] = {}
+    for rule in structured_rules:
+        rule_name = str(rule["rule_name"])
+        legacy_rule = legacy_map.get(rule_name)
+        if legacy_rule is None:
+            verification_by_rule[rule_name] = {
+                "equivalence_cases": 0,
+                "equivalence_matches": 0,
+                "equivalence_mismatches": 0,
+                "equivalence_match_rate": 1.0,
+                "equivalence_status": "PASS",
+                "counterexamples": [],
+                "mutation_total": 0,
+                "mutation_killed": 0,
+                "mutation_survived": 0,
+                "mutation_score": 1.0,
+                "mutation_survived_mutants": [],
+                "verification_score": 1.0,
+            }
+            continue
+        verification_by_rule[rule_name] = run_rule_verification(
+            rule=rule,
+            perl_evaluator=legacy_rule.evaluator,
+            check_fn=python_checks[rule_name],
+            python_code=str(conversion_metadata[rule_name]["python_code"]),
+            function_name=str(conversion_metadata[rule_name]["function_name"]),
+            seed=seed,
+        )
+    return verification_by_rule
+
+
 def _build_failed_case_rows(
     mismatch_ids: Sequence[str],
     product_map: Dict[str, Mapping[str, object]],
@@ -159,11 +199,15 @@ def _build_failed_case_rows(
                 "perl_triggered": product_id in perl_ids,
                 "python_triggered": product_id in python_ids,
                 "energy_kj": product.get("energy_kj"),
+                "energy_kj_computed": product.get("energy_kj_computed"),
                 "energy_kcal": product.get("energy_kcal"),
                 "fat": product.get("fat"),
                 "saturated_fat": product.get("saturated_fat"),
                 "carbohydrates": product.get("carbohydrates"),
                 "sugars": product.get("sugars"),
+                "starch": product.get("starch"),
+                "lc": product.get("lc"),
+                "lang": product.get("lang"),
                 "language_code": product.get("language_code"),
             }
         )
@@ -176,6 +220,7 @@ def _compute_rule_result(
     python_rule_products: Sequence[str],
     product_map: Dict[str, Mapping[str, object]],
     conversion_meta: Dict[str, object],
+    verification_meta: Mapping[str, object] | None = None,
     db_path: Path = DB_PATH,
 ) -> Dict[str, object]:
     product_ids = set(product_map)
@@ -212,12 +257,18 @@ def _compute_rule_result(
     duckdb_condition = str(rule["duckdb_condition"])
     duckdb_error_count = count_violations(duckdb_condition, db_path=db_path)
     duckdb_examples = sample_violations(duckdb_condition, limit=5, db_path=db_path)
+    verification = dict(verification_meta or {})
 
     return {
         "rule_name": rule["rule_name"],
         "tag": rule["tag"],
         "severity": rule["severity"],
         "condition": rule["condition"],
+        "rule_ir": rule.get("rule_ir"),
+        "rule_ir_hash": rule.get("rule_ir_hash"),
+        "condition_type": rule.get("condition_type", "unknown"),
+        "complexity": rule.get("complexity", "unknown"),
+        "declarative_friendly": rule.get("declarative_friendly"),
         "products_tested": total_tests,
         "perl_errors": len(perl_ids),
         "python_errors": len(python_ids),
@@ -247,6 +298,21 @@ def _compute_rule_result(
         "duckdb_errors": duckdb_error_count,
         "duckdb_condition": duckdb_condition,
         "duckdb_example_rows": duckdb_examples,
+        "equivalence_cases": int(verification.get("equivalence_cases", 0)),
+        "equivalence_matches": int(verification.get("equivalence_matches", 0)),
+        "equivalence_mismatches": int(verification.get("equivalence_mismatches", 0)),
+        "equivalence_match_rate": round(float(verification.get("equivalence_match_rate", 1.0)), 4),
+        "equivalence_status": verification.get("equivalence_status", "PASS"),
+        "equivalence_counterexamples": list(verification.get("counterexamples", [])),
+        "mutation_total": int(verification.get("mutation_total", 0)),
+        "mutation_killed": int(verification.get("mutation_killed", 0)),
+        "mutation_survived": int(verification.get("mutation_survived", 0)),
+        "mutation_score": round(float(verification.get("mutation_score", 1.0)), 4),
+        "mutation_survived_mutants": list(verification.get("mutation_survived_mutants", [])),
+        "verification_score": round(float(verification.get("verification_score", 1.0)), 4),
+        "counterexample_repair_attempted": bool(verification.get("counterexample_repair_attempted", False)),
+        "counterexample_repair_applied": bool(verification.get("counterexample_repair_applied", False)),
+        "counterexample_repair_error": str(verification.get("counterexample_repair_error", "")),
         "mismatch_product_ids": mismatch_ids,
         "failed_test_cases": _build_failed_case_rows(
             mismatch_ids=mismatch_ids,
@@ -272,8 +338,12 @@ def run_pipeline(
     llm_provider: str = "groq",
     llm_model: str | None = None,
     perl_rules_dir: Path | None = None,
+    execution_engine: str = "python",
 ) -> Dict[str, object]:
     """Run the full migration prototype pipeline and persist JSON results."""
+    if execution_engine not in {"python", "dbt", "soda"}:
+        raise ValueError("execution_engine must be one of: python, dbt, soda")
+
     source_path = source_jsonl
     if source_path is None and use_default_off_source and DEFAULT_OFF_JSONL.exists():
         source_path = DEFAULT_OFF_JSONL
@@ -283,9 +353,83 @@ def run_pipeline(
 
     perl_output = run_perl_checks(products, LEGACY_RULES)
     structured_rules = extract_rules(get_perl_rule_snippets(LEGACY_RULES, rules_dir=perl_rules_dir))
-    converted_rules = convert_rules(structured_rules, provider=llm_provider, model=llm_model)
-    python_checks, conversion_metadata = compile_generated_checks(converted_rules)
-    python_output = _run_python_checks(products, structured_rules, python_checks)
+    engine_run: Dict[str, object] | None = None
+    verification_by_rule: Dict[str, Dict[str, object]] = {}
+
+    if execution_engine == "python":
+        converted_rules = convert_rules(structured_rules, provider=llm_provider, model=llm_model)
+        converted_by_name = {str(item["rule_name"]): dict(item) for item in converted_rules}
+        repair_flags: Dict[str, Dict[str, object]] = {
+            str(rule["rule_name"]): {
+                "counterexample_repair_attempted": False,
+                "counterexample_repair_applied": False,
+                "counterexample_repair_error": "",
+            }
+            for rule in structured_rules
+        }
+
+        python_checks, conversion_metadata = compile_generated_checks(
+            [converted_by_name[str(rule["rule_name"])] for rule in structured_rules]
+        )
+        initial_verification = _run_python_verification(
+            structured_rules=structured_rules,
+            python_checks=python_checks,
+            conversion_metadata=conversion_metadata,
+            seed=seed,
+        )
+
+        if llm_provider == "groq":
+            for rule in structured_rules:
+                rule_name = str(rule["rule_name"])
+                verification = initial_verification.get(rule_name, {})
+                provider = str(conversion_metadata[rule_name].get("provider", ""))
+                if provider != "groq":
+                    continue
+                if int(verification.get("equivalence_mismatches", 0)) <= 0:
+                    continue
+
+                repair_flags[rule_name]["counterexample_repair_attempted"] = True
+                try:
+                    repaired = repair_conversion_with_counterexamples(
+                        rule=rule,
+                        converted_rule=converted_by_name[rule_name],
+                        counterexamples=list(verification.get("counterexamples", [])),
+                        provider=llm_provider,
+                        model=llm_model,
+                    )
+                    if str(repaired.get("python_code", "")) != str(converted_by_name[rule_name].get("python_code", "")):
+                        converted_by_name[rule_name] = repaired
+                        repair_flags[rule_name]["counterexample_repair_applied"] = True
+                except Exception as exc:  # noqa: BLE001
+                    repair_flags[rule_name]["counterexample_repair_error"] = f"{exc.__class__.__name__}: {exc}"
+
+        python_checks, conversion_metadata = compile_generated_checks(
+            [converted_by_name[str(rule["rule_name"])] for rule in structured_rules]
+        )
+        verification_by_rule = _run_python_verification(
+            structured_rules=structured_rules,
+            python_checks=python_checks,
+            conversion_metadata=conversion_metadata,
+            seed=seed,
+        )
+        for rule in structured_rules:
+            rule_name = str(rule["rule_name"])
+            verification_by_rule.setdefault(rule_name, {}).update(repair_flags.get(rule_name, {}))
+
+        candidate_output = _run_python_checks(products, structured_rules, python_checks)
+    else:
+        declarative_result = run_declarative_checks(
+            rules=structured_rules,
+            products=products,
+            db_path=db_path,
+            engine=execution_engine,
+        )
+        candidate_output = {
+            "per_product": declarative_result["per_product"],
+            "per_rule": declarative_result["per_rule"],
+        }
+        conversion_metadata = declarative_result["conversion_metadata"]
+        engine_run = declarative_result["engine_run"]
 
     rule_results: List[Dict[str, object]] = []
     for rule in structured_rules:
@@ -293,9 +437,10 @@ def run_pipeline(
         rule_result = _compute_rule_result(
             rule=rule,
             perl_rule_products=perl_output["per_rule"][rule_name],
-            python_rule_products=python_output["per_rule"][rule_name],
+            python_rule_products=candidate_output["per_rule"][rule_name],
             product_map=product_map,
             conversion_meta=conversion_metadata[rule_name],
+            verification_meta=verification_by_rule.get(rule_name),
             db_path=db_path,
         )
         rule_results.append(rule_result)
@@ -312,6 +457,7 @@ def run_pipeline(
             "products_tested": len(products),
             "source_jsonl": str(source_path) if source_path else "synthetic",
             "perl_rules_source": str(perl_rules_dir) if perl_rules_dir else "inline_legacy_rules",
+            "execution_engine": execution_engine,
         },
         "migration_summary": {
             "total_rules": total_rules,
@@ -321,6 +467,8 @@ def run_pipeline(
         },
         "rule_results": rule_results,
     }
+    if engine_run is not None:
+        result_payload["declarative_engine_run"] = engine_run
 
     results_path.parent.mkdir(parents=True, exist_ok=True)
     with results_path.open("w", encoding="utf-8") as handle:
@@ -345,7 +493,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--llm-provider",
-        choices=["simulated", "openrouter", "groq"],
+        choices=["simulated", "groq"],
         default="groq",
         help="Rule conversion provider.",
     )
@@ -360,6 +508,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional directory containing .pl rule snippets for extractor input.",
     )
+    parser.add_argument(
+        "--execution-engine",
+        choices=["python", "dbt", "soda"],
+        default="python",
+        help="Check execution engine for parity target: python (LLM converted), dbt, or soda.",
+    )
     return parser.parse_args()
 
 
@@ -372,12 +526,14 @@ def main() -> None:
         llm_provider=args.llm_provider,
         llm_model=args.llm_model,
         perl_rules_dir=args.perl_rules_dir,
+        execution_engine=args.execution_engine,
     )
     summary = results["migration_summary"]
     print(f"Rules analyzed: {summary['total_rules']}")
     print(f"Passed rules: {summary['passed_rules']}")
     print(f"Rules needing review: {summary['rules_needing_review']}")
     print(f"Dataset source: {results['dataset']['source_jsonl']}")
+    print(f"Execution engine: {results['dataset'].get('execution_engine', 'python')}")
     print(f"Results written to: {RESULT_PATH}")
 
 
