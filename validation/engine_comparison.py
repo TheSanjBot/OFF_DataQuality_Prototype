@@ -11,6 +11,7 @@ from statistics import mean
 from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
 
 from data.load_dataset import DB_PATH, DEFAULT_OFF_JSONL
+from rulepacks.registry import DEFAULT_PROFILE, SUPPORTED_PROFILES
 from validation.parity_validator import RESULT_PATH, run_pipeline
 
 COMPARISON_PATH = Path(__file__).resolve().parent.parent / "results" / "engine_comparison.json"
@@ -335,6 +336,17 @@ def _build_rule_comparison(engine_payloads: Mapping[str, Mapping[str, object]]) 
             "tag": reference.get("tag"),
             "severity": reference.get("severity"),
             "condition": reference.get("condition"),
+            "jurisdiction": reference.get("jurisdiction", "global"),
+            "profile_tags": list(reference.get("profile_tags", [])),
+            "regulatory_type": reference.get("regulatory_type", ""),
+            "legal_citation": reference.get("legal_citation", ""),
+            "source_url": reference.get("source_url", ""),
+            "effective_date": reference.get("effective_date", ""),
+            "review_status": reference.get("review_status", ""),
+            "reviewer": reference.get("reviewer", ""),
+            "required_fields": list(reference.get("required_fields", [])),
+            "exemption_logic": reference.get("exemption_logic", ""),
+            "rule_notes": reference.get("rule_notes", ""),
             "rule_ir_hash": reference.get("rule_ir_hash"),
             "condition_type": reference.get("condition_type", "unknown"),
             "complexity": reference.get("complexity", "unknown"),
@@ -392,6 +404,7 @@ def _run_for_engines(
     llm_model: str | None,
     perl_rules_dir: Path | None,
     db_path: Path,
+    profile: str,
 ) -> Dict[str, Dict[str, object]]:
     engine_payloads: Dict[str, Dict[str, object]] = {}
     temp_results_dir = RESULT_PATH.parent / "tmp_engine_runs"
@@ -410,6 +423,7 @@ def _run_for_engines(
             llm_model=llm_model,
             perl_rules_dir=perl_rules_dir,
             execution_engine=engine,
+            profile=profile,
         )
         engine_payloads[engine] = payload
     return engine_payloads
@@ -426,6 +440,7 @@ def run_engine_comparison(
     db_path: Path = DB_PATH,
     results_path: Path = COMPARISON_PATH,
     require_real_llm: bool = False,
+    profile: str = DEFAULT_PROFILE,
 ) -> Dict[str, object]:
     """Run all engines and emit a rule-by-rule comparison report."""
     engine_payloads = _run_for_engines(
@@ -437,6 +452,7 @@ def run_engine_comparison(
         llm_model=llm_model,
         perl_rules_dir=perl_rules_dir,
         db_path=db_path,
+        profile=profile,
     )
     if require_real_llm:
         python_rows = list(engine_payloads.get("python", {}).get("rule_results", []))
@@ -494,6 +510,7 @@ def run_engine_comparison(
             "llm_model": llm_model,
             "require_real_llm": require_real_llm,
             "groq_api_key_set": bool(os.getenv("GROQ_API_KEY")),
+            "profile": profile,
         },
     }
 
@@ -527,6 +544,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--llm-model", default=None, help="Optional model override for selected LLM provider.")
     parser.add_argument("--perl-rules-dir", type=Path, default=None, help="Optional directory of .pl snippets.")
+    parser.add_argument(
+        "--profile",
+        choices=list(SUPPORTED_PROFILES),
+        default=DEFAULT_PROFILE,
+        help="Rule-pack profile to compare: global, canada, or hybrid.",
+    )
     parser.add_argument("--results-path", type=Path, default=COMPARISON_PATH, help="Output comparison JSON path.")
     parser.add_argument(
         "--require-real-llm",
@@ -551,6 +574,7 @@ def main() -> None:
         perl_rules_dir=args.perl_rules_dir,
         results_path=args.results_path,
         require_real_llm=args.require_real_llm,
+        profile=args.profile,
     )
     print(f"Engines compared: {', '.join(report['engines'])}")
     for engine, summary in report["per_engine_summary"].items():
@@ -565,6 +589,8 @@ def main() -> None:
             "LLM key status: "
             f"GROQ_API_KEY={report['run_config']['groq_api_key_set']}"
         )
+    if report.get("dataset"):
+        print(f"Profile: {report['dataset'].get('profile', DEFAULT_PROFILE)}")
     print(f"Comparison written to: {args.results_path}")
 
 

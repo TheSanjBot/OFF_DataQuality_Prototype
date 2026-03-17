@@ -102,6 +102,26 @@ def _is_missing(value: object) -> bool:
     return value is None or str(value).strip() == ""
 
 
+def _compare_values(left_value: object, operator: str, right_value: object) -> bool:
+    left = _to_float(left_value)
+    right = _to_float(right_value)
+    if left is None or right is None:
+        return False
+    if operator == ">":
+        return left > right
+    if operator == "<":
+        return left < right
+    if operator == ">=":
+        return left >= right
+    if operator == "<=":
+        return left <= right
+    if operator == "==":
+        return left == right
+    if operator == "!=":
+        return left != right
+    return False
+
+
 LEGACY_RULES: List[LegacyRule] = [
     LegacyRule(
         rule_name="energy_kcal_vs_kj",
@@ -396,8 +416,129 @@ if (!defined $lc || $lc eq "") {
 if (!defined $lang || $lang eq "") {
     push @{$product_ref->{$data_quality_tags}}, "main-language-missing";
 }
-""".strip(),
+        """.strip(),
         evaluator=lambda product: _is_missing(product.get("lang")),
+    ),
+    LegacyRule(
+        rule_name="ca_allergen_evidence_missing_ingredients_text",
+        tag="ca-allergen-evidence-but-missing-ingredients-text",
+        severity="warning",
+        condition="allergen_evidence_present > 0 && ingredients_text_present == 0",
+        duckdb_condition="allergen_evidence_present > 0 AND ingredients_text_present == 0",
+        complexity="medium",
+        declarative_friendly=True,
+        perl_logic="""
+# RULE_NAME: ca_allergen_evidence_missing_ingredients_text
+# SEVERITY: warning
+# COMPLEXITY: medium
+# DECLARATIVE_FRIENDLY: yes
+if (($allergen_evidence_present > 0) && ($ingredients_text_present == 0)) {
+    push @{$product_ref->{$data_quality_tags}}, "ca-allergen-evidence-but-missing-ingredients-text";
+}
+""".strip(),
+        evaluator=lambda product: (
+            _compare_values(product.get("allergen_evidence_present"), ">", 0)
+            and _compare_values(product.get("ingredients_text_present"), "==", 0)
+        ),
+    ),
+    LegacyRule(
+        rule_name="ca_contains_statement_without_allergen_evidence",
+        tag="ca-contains-statement-without-allergen-evidence",
+        severity="warning",
+        condition="contains_statement_present > 0 && allergen_evidence_present == 0",
+        duckdb_condition="contains_statement_present > 0 AND allergen_evidence_present == 0",
+        complexity="medium",
+        declarative_friendly=True,
+        perl_logic="""
+# RULE_NAME: ca_contains_statement_without_allergen_evidence
+# SEVERITY: warning
+# COMPLEXITY: medium
+# DECLARATIVE_FRIENDLY: yes
+if (($contains_statement_present > 0) && ($allergen_evidence_present == 0)) {
+    push @{$product_ref->{$data_quality_tags}}, "ca-contains-statement-without-allergen-evidence";
+}
+""".strip(),
+        evaluator=lambda product: (
+            _compare_values(product.get("contains_statement_present"), ">", 0)
+            and _compare_values(product.get("allergen_evidence_present"), "==", 0)
+        ),
+    ),
+    LegacyRule(
+        rule_name="ca_fop_required_but_symbol_missing",
+        tag="ca-fop-required-but-symbol-missing",
+        severity="error",
+        condition="fop_threshold_exceeded > 0 && fop_symbol_present == 0 && fop_exempt_proxy == 0 && product_is_prepackaged_proxy > 0",
+        duckdb_condition=(
+            "fop_threshold_exceeded > 0 AND fop_symbol_present == 0 "
+            "AND fop_exempt_proxy == 0 AND product_is_prepackaged_proxy > 0"
+        ),
+        complexity="medium",
+        declarative_friendly=True,
+        perl_logic="""
+# RULE_NAME: ca_fop_required_but_symbol_missing
+# SEVERITY: error
+# COMPLEXITY: medium
+# DECLARATIVE_FRIENDLY: yes
+if (($fop_threshold_exceeded > 0) && ($fop_symbol_present == 0) && ($fop_exempt_proxy == 0) && ($product_is_prepackaged_proxy > 0)) {
+    push @{$product_ref->{$data_quality_tags}}, "ca-fop-required-but-symbol-missing";
+}
+""".strip(),
+        evaluator=lambda product: (
+            _compare_values(product.get("fop_threshold_exceeded"), ">", 0)
+            and _compare_values(product.get("fop_symbol_present"), "==", 0)
+            and _compare_values(product.get("fop_exempt_proxy"), "==", 0)
+            and _compare_values(product.get("product_is_prepackaged_proxy"), ">", 0)
+        ),
+    ),
+    LegacyRule(
+        rule_name="ca_fop_symbol_present_but_not_required",
+        tag="ca-fop-symbol-present-but-not-required",
+        severity="warning",
+        condition="fop_symbol_present > 0 && fop_threshold_exceeded == 0 && fop_exempt_proxy == 0 && product_is_prepackaged_proxy > 0",
+        duckdb_condition=(
+            "fop_symbol_present > 0 AND fop_threshold_exceeded == 0 "
+            "AND fop_exempt_proxy == 0 AND product_is_prepackaged_proxy > 0"
+        ),
+        complexity="medium",
+        declarative_friendly=True,
+        perl_logic="""
+# RULE_NAME: ca_fop_symbol_present_but_not_required
+# SEVERITY: warning
+# COMPLEXITY: medium
+# DECLARATIVE_FRIENDLY: yes
+if (($fop_symbol_present > 0) && ($fop_threshold_exceeded == 0) && ($fop_exempt_proxy == 0) && ($product_is_prepackaged_proxy > 0)) {
+    push @{$product_ref->{$data_quality_tags}}, "ca-fop-symbol-present-but-not-required";
+}
+""".strip(),
+        evaluator=lambda product: (
+            _compare_values(product.get("fop_symbol_present"), ">", 0)
+            and _compare_values(product.get("fop_threshold_exceeded"), "==", 0)
+            and _compare_values(product.get("fop_exempt_proxy"), "==", 0)
+            and _compare_values(product.get("product_is_prepackaged_proxy"), ">", 0)
+        ),
+    ),
+    LegacyRule(
+        rule_name="ca_fop_symbol_present_on_exempt_product",
+        tag="ca-fop-symbol-present-on-exempt-product",
+        severity="warning",
+        condition="fop_symbol_present > 0 && fop_exempt_proxy > 0 && product_is_prepackaged_proxy > 0",
+        duckdb_condition="fop_symbol_present > 0 AND fop_exempt_proxy > 0 AND product_is_prepackaged_proxy > 0",
+        complexity="medium",
+        declarative_friendly=True,
+        perl_logic="""
+# RULE_NAME: ca_fop_symbol_present_on_exempt_product
+# SEVERITY: warning
+# COMPLEXITY: medium
+# DECLARATIVE_FRIENDLY: yes
+if (($fop_symbol_present > 0) && ($fop_exempt_proxy > 0) && ($product_is_prepackaged_proxy > 0)) {
+    push @{$product_ref->{$data_quality_tags}}, "ca-fop-symbol-present-on-exempt-product";
+}
+""".strip(),
+        evaluator=lambda product: (
+            _compare_values(product.get("fop_symbol_present"), ">", 0)
+            and _compare_values(product.get("fop_exempt_proxy"), ">", 0)
+            and _compare_values(product.get("product_is_prepackaged_proxy"), ">", 0)
+        ),
     ),
 ]
 

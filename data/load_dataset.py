@@ -27,10 +27,35 @@ CORE_FIELDS = [
     "carbohydrates",
     "sugars",
     "starch",
+    "sodium",
+    "ingredients_text",
+    "ingredients_text_present",
+    "contains_statement_present",
+    "allergen_evidence_present",
+    "fop_threshold_exceeded",
+    "fop_symbol_present",
+    "fop_exempt_proxy",
+    "product_is_prepackaged_proxy",
 ]
 
 # Additional fields used for OFF language-related checks.
 OPTIONAL_FIELDS = ["lc", "lang", "language_code"]
+
+
+def _to_int_flag(value: bool) -> int:
+    return 1 if value else 0
+
+
+def _compute_fop_threshold_exceeded(sugars: object, saturated_fat: object, sodium: object) -> int:
+    """Proxy Front-of-Pack trigger for prototype experiments.
+
+    This is intentionally a simplified threshold model to exercise migration
+    architecture and should not be interpreted as full legal implementation.
+    """
+    sugars_val = _to_float(sugars) or 0.0
+    sat_fat_val = _to_float(saturated_fat) or 0.0
+    sodium_val = _to_float(sodium) or 0.0
+    return _to_int_flag((sugars_val >= 15.0) or (sat_fat_val >= 6.0) or (sodium_val >= 0.6))
 
 
 @dataclass(frozen=True)
@@ -78,7 +103,7 @@ def _apply_deterministic_synthetic_scenarios(index: int, product: Dict[str, obje
     This keeps synthetic runs visually informative in the dashboard by ensuring
     each rule receives recurring, known-positive examples.
     """
-    bucket = index % 15
+    bucket = index % 21
 
     if bucket == 1:
         # energy_kcal > energy_kj
@@ -141,6 +166,40 @@ def _apply_deterministic_synthetic_scenarios(index: int, product: Dict[str, obje
         # energy_kj_computed > (1.3 * energy_kj + 5)
         energy_kj = float(product["energy_kj"])
         product["energy_kj_computed"] = round((1.3 * energy_kj) + rng.uniform(6.0, 25.0), 1)
+    elif bucket == 15:
+        # Allergen evidence present but ingredients text missing.
+        product["allergen_evidence_present"] = 1
+        product["contains_statement_present"] = 1
+        product["ingredients_text"] = ""
+        product["ingredients_text_present"] = 0
+    elif bucket == 16:
+        # Contains statement present without allergen evidence.
+        product["contains_statement_present"] = 1
+        product["allergen_evidence_present"] = 0
+        product["ingredients_text"] = "Contains: milk, soy."
+        product["ingredients_text_present"] = 1
+    elif bucket == 17:
+        # FOP required but symbol missing.
+        product["fop_threshold_exceeded"] = 1
+        product["fop_symbol_present"] = 0
+        product["fop_exempt_proxy"] = 0
+        product["product_is_prepackaged_proxy"] = 1
+    elif bucket == 18:
+        # FOP symbol present but threshold not exceeded (and not exempt).
+        product["fop_threshold_exceeded"] = 0
+        product["fop_symbol_present"] = 1
+        product["fop_exempt_proxy"] = 0
+        product["product_is_prepackaged_proxy"] = 1
+    elif bucket == 19:
+        # FOP symbol present on exempt product (proxy inconsistency).
+        product["fop_threshold_exceeded"] = 1
+        product["fop_symbol_present"] = 1
+        product["fop_exempt_proxy"] = 1
+        product["product_is_prepackaged_proxy"] = 1
+    elif bucket == 20:
+        # Not prepackaged proxy case (used to suppress FOP obligations).
+        product["product_is_prepackaged_proxy"] = 0
+        product["fop_symbol_present"] = 0
 
 
 def generate_product(index: int, rng: random.Random) -> Dict[str, object]:
@@ -153,6 +212,7 @@ def generate_product(index: int, rng: random.Random) -> Dict[str, object]:
     carbohydrates = round(rng.uniform(0.0, 100.0), 1)
     sugars = round(rng.uniform(0.0, carbohydrates), 1)
     starch = round(rng.uniform(0.0, max(carbohydrates - sugars, 0.0)), 1)
+    sodium = round(rng.uniform(0.0, 1.5), 3)
 
     if _maybe(0.10, rng):
         energy_kcal = energy_kj + rng.randint(1, 100)
@@ -181,6 +241,7 @@ def generate_product(index: int, rng: random.Random) -> Dict[str, object]:
         "carbohydrates": carbohydrates,
         "sugars": sugars,
         "starch": starch,
+        "sodium": sodium,
     }
 
     for nutrient in ("fat", "saturated_fat", "carbohydrates", "sugars"):
@@ -200,6 +261,37 @@ def generate_product(index: int, rng: random.Random) -> Dict[str, object]:
     product["lc"] = language_code
     product["lang"] = lang_value
     product["language_code"] = language_code or lang_value
+    ingredients_text = rng.choices(
+        [
+            "Sugar, milk powder, cocoa butter.",
+            "Water, apple juice concentrate.",
+            "Ingredients: wheat flour, salt, yeast.",
+            "",
+            None,
+        ],
+        weights=[0.30, 0.22, 0.22, 0.16, 0.10],
+        k=1,
+    )[0]
+    product["ingredients_text"] = ingredients_text if ingredients_text is not None else ""
+    product["ingredients_text_present"] = _to_int_flag(str(product["ingredients_text"]).strip() != "")
+
+    # Prototype proxies for Canadian allergen/FOP checks.
+    contains_statement_present = _maybe(0.22, rng)
+    allergen_evidence_present = contains_statement_present or _maybe(0.15, rng)
+    fop_threshold_exceeded = _compute_fop_threshold_exceeded(product.get("sugars"), product.get("saturated_fat"), product.get("sodium"))
+    fop_exempt_proxy = _to_int_flag(_maybe(0.10, rng))
+    product_is_prepackaged_proxy = _to_int_flag(not _maybe(0.05, rng))
+    fop_symbol_present = _to_int_flag(
+        (fop_threshold_exceeded == 1 and _maybe(0.78, rng))
+        or (fop_threshold_exceeded == 0 and _maybe(0.10, rng))
+    )
+
+    product["contains_statement_present"] = _to_int_flag(contains_statement_present)
+    product["allergen_evidence_present"] = _to_int_flag(allergen_evidence_present)
+    product["fop_threshold_exceeded"] = int(fop_threshold_exceeded)
+    product["fop_symbol_present"] = int(fop_symbol_present)
+    product["fop_exempt_proxy"] = int(fop_exempt_proxy)
+    product["product_is_prepackaged_proxy"] = int(product_is_prepackaged_proxy)
     _apply_deterministic_synthetic_scenarios(index=index, product=product, rng=rng)
     return product
 
@@ -242,9 +334,36 @@ def extract_product_from_off_record(record: Mapping[str, object]) -> Dict[str, o
     carbohydrates = _first_number(nutriments.get("carbohydrates_100g"), nutriments.get("carbohydrates"))
     sugars = _first_number(nutriments.get("sugars_100g"), nutriments.get("sugars"))
     starch = _first_number(nutriments.get("starch_100g"), nutriments.get("starch"))
+    sodium = _first_number(nutriments.get("sodium_100g"), nutriments.get("sodium"))
+    if sodium is None:
+        salt_value = _first_number(nutriments.get("salt_100g"), nutriments.get("salt"))
+        if salt_value is not None:
+            sodium = round(float(salt_value) * 0.393, 4)
     lc = record.get("lc")
     lang = record.get("lang")
     language_code = lc or lang
+    ingredients_text = str(record.get("ingredients_text") or "").strip()
+
+    allergens_tags = record.get("allergens_tags")
+    allergens_list = allergens_tags if isinstance(allergens_tags, list) else []
+    contains_statement_present = bool(record.get("allergens")) or bool(record.get("traces")) or bool(allergens_list)
+    allergen_evidence_present = contains_statement_present or bool(record.get("allergens_from_ingredients"))
+
+    labels_tags = record.get("labels_tags")
+    labels_list = labels_tags if isinstance(labels_tags, list) else []
+    labels_text = " ".join(str(item).lower() for item in labels_list)
+    fop_symbol_present = (
+        ("high-in-sugars" in labels_text)
+        or ("high-in-sodium" in labels_text)
+        or ("high-in-saturated-fat" in labels_text)
+    )
+
+    categories_tags = record.get("categories_tags")
+    categories_list = categories_tags if isinstance(categories_tags, list) else []
+    categories_text = " ".join(str(item).lower() for item in categories_list)
+    fop_exempt_proxy = ("en:waters" in categories_text) or ("en:unflavoured-waters" in categories_text)
+    product_is_prepackaged_proxy = True
+    fop_threshold_exceeded = _compute_fop_threshold_exceeded(sugars, saturated_fat, sodium)
 
     return {
         "product_id": product_id,
@@ -256,6 +375,15 @@ def extract_product_from_off_record(record: Mapping[str, object]) -> Dict[str, o
         "carbohydrates": carbohydrates,
         "sugars": sugars,
         "starch": starch,
+        "sodium": sodium,
+        "ingredients_text": ingredients_text,
+        "ingredients_text_present": _to_int_flag(ingredients_text != ""),
+        "contains_statement_present": _to_int_flag(contains_statement_present),
+        "allergen_evidence_present": _to_int_flag(allergen_evidence_present),
+        "fop_threshold_exceeded": int(fop_threshold_exceeded),
+        "fop_symbol_present": _to_int_flag(fop_symbol_present),
+        "fop_exempt_proxy": _to_int_flag(fop_exempt_proxy),
+        "product_is_prepackaged_proxy": _to_int_flag(product_is_prepackaged_proxy),
         "lc": lc,
         "lang": lang,
         "language_code": language_code,

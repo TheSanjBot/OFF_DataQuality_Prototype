@@ -49,4 +49,36 @@ def test_deterministic_conversion_behaves_like_expected_templates() -> None:
     assert missing_lang_tag == "main-language-missing"
     assert checks["main_language_missing"]({"lang": "en"}) is None
 
+    ca_allergen_tag = checks["ca_allergen_evidence_missing_ingredients_text"](
+        {"allergen_evidence_present": 1, "ingredients_text_present": 0}
+    )
+    assert ca_allergen_tag == "ca-allergen-evidence-but-missing-ingredients-text"
+    assert (
+        checks["ca_allergen_evidence_missing_ingredients_text"](
+            {"allergen_evidence_present": 1, "ingredients_text_present": 1}
+        )
+        is None
+    )
+
+    ca_fop_missing_tag = checks["ca_fop_required_but_symbol_missing"](
+        {
+            "fop_threshold_exceeded": 1,
+            "fop_symbol_present": 0,
+            "fop_exempt_proxy": 0,
+            "product_is_prepackaged_proxy": 1,
+        }
+    )
+    assert ca_fop_missing_tag == "ca-fop-required-but-symbol-missing"
+    assert (
+        checks["ca_fop_required_but_symbol_missing"](
+            {
+                "fop_threshold_exceeded": 1,
+                "fop_symbol_present": 1,
+                "fop_exempt_proxy": 0,
+                "product_is_prepackaged_proxy": 1,
+            }
+        )
+        is None
+    )
+
     assert metadata["energy_kcal_vs_kj"]["provider"] == "simulated"

@@ -9,6 +9,7 @@ Dataset (JSONL)
 -> DuckDB table
 -> Simulated legacy Perl checks
 -> Perl logic extractor
+-> Rule-pack profile layer (global / canada / hybrid)
 -> LLM-style Python conversion
 -> Semantic guardrail checks on generated Python
 -> Generated Python checks
@@ -28,6 +29,8 @@ off_quality_migration_prototype/
     create_tables.py
   perl_checks/
     legacy_checks.py
+  rulepacks/
+    registry.py
   extractor/
     perl_logic_extractor.py
   migration/
@@ -53,17 +56,24 @@ Note: the database helper package is named `duckdb_utils` (instead of
 ## Implemented Example Checks
 
 - `energy_kcal > energy_kj`
-- `sugars > carbohydrates`
-- `saturated_fat > fat`
+- `energy_kj < (3.7 * energy_kcal - 2)` (intricate)
+- `energy_kj > (4.7 * energy_kcal + 2)` (intricate)
+- `energy_kj > 3911`
+- `energy_kj_computed < (0.7 * energy_kj - 5)` (intricate)
+- `energy_kj_computed > (1.3 * energy_kj + 5)` (intricate)
+- `saturated_fat > (fat + 0.001)`
+- `(sugars + starch) > (carbohydrates + 0.001)` (medium)
 - `fat > 105`
 - `saturated_fat > 105`
 - `carbohydrates > 105`
 - `sugars > 105`
-- missing language code (`language_code is null/empty`)
-- `saturated_fat > (fat * 0.8)` (intricate)
-- `sugars > (carbohydrates * 0.95)` (intricate)
-- `energy_kcal > 350 && fat < 5 && carbohydrates < 10` (medium)
-- `energy_kcal > 420 && fat > 25 && sugars > 30` (medium)
+- missing main language code (`lc is null/empty`) [Canada profile]
+- missing main language value (`lang is null/empty`) [Canada profile]
+- `allergen_evidence_present > 0 && ingredients_text_present == 0` [Canada profile]
+- `contains_statement_present > 0 && allergen_evidence_present == 0` [Canada profile]
+- `fop_threshold_exceeded > 0 && fop_symbol_present == 0 && fop_exempt_proxy == 0 && product_is_prepackaged_proxy > 0` [Canada profile]
+- `fop_symbol_present > 0 && fop_threshold_exceeded == 0 && fop_exempt_proxy == 0 && product_is_prepackaged_proxy > 0` [Canada profile]
+- `fop_symbol_present > 0 && fop_exempt_proxy > 0 && product_is_prepackaged_proxy > 0` [Canada profile]
 
 Each check emits an OFF-style quality tag.
 
@@ -123,6 +133,14 @@ and writes a unified report:
 python -m validation.engine_comparison --size 300 --mode off --llm-provider groq
 ```
 
+Run a specific rule-pack profile:
+
+```bash
+python -m validation.engine_comparison --size 300 --mode off --llm-provider groq --profile hybrid
+python -m validation.engine_comparison --size 300 --mode off --llm-provider groq --profile global
+python -m validation.engine_comparison --size 300 --mode off --llm-provider groq --profile canada
+```
+
 Require real LLM usage for Python engine (fail if simulated fallback is used):
 
 ```bash
@@ -145,6 +163,7 @@ The report includes:
 - per-complexity summary (simple/medium/intricate win distribution)
 - rule-by-rule metrics across all engines
 - best engine recommendation per rule
+- jurisdiction and legal-traceability metadata when available
 
 Best-engine ranking uses:
 
@@ -160,6 +179,42 @@ effective_confidence = overall_confidence * provider_factor
 
 `provider_factor` penalizes fallback providers so non-LLM/non-native fallback paths
 do not unfairly win by tiny score differences.
+
+## Profile Layer (Global / Canada / Hybrid)
+
+The prototype now supports one core engine with profile-driven rule packs:
+
+- `global`: OFF-derived generic rules.
+- `canada`: Canada-focused rules with citation metadata.
+- `hybrid`: union of both packs (default).
+
+Canada rules currently included in profile mode:
+
+- `main_language_code_missing`
+- `main_language_missing`
+- `ca_allergen_evidence_missing_ingredients_text`
+- `ca_contains_statement_without_allergen_evidence`
+- `ca_fop_required_but_symbol_missing`
+- `ca_fop_symbol_present_but_not_required`
+- `ca_fop_symbol_present_on_exempt_product`
+
+Canada profile metadata fields emitted per rule:
+
+- `jurisdiction`
+- `regulatory_type`
+- `legal_citation`
+- `source_url`
+- `effective_date`
+- `review_status`
+- `reviewer`
+- `required_fields`
+- `exemption_logic`
+
+Important note:
+
+- Current Canada rules are **phase-1 regulatory proxies** using fields available in this
+  prototype dataset. They provide migration/validation architecture for CA logic with legal
+  traceability metadata, but are not a full legal compliance engine.
 
 ## Mixed-Complexity Benchmark (What It Adds)
 
@@ -190,6 +245,13 @@ Then run:
 
 ```bash
 python -m validation.parity_validator --size 300 --llm-provider groq --llm-model openai/gpt-oss-120b
+```
+
+Run with a selected profile:
+
+```bash
+python -m validation.parity_validator --size 300 --llm-provider groq --profile hybrid
+python -m validation.parity_validator --size 300 --llm-provider groq --profile canada
 ```
 
 If API access is unavailable, conversion automatically falls back to the

@@ -1,6 +1,7 @@
 """Streamlit dashboard for cross-engine migration comparison."""
 from __future__ import annotations
 
+import html
 import json
 import os
 import sys
@@ -16,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from rulepacks.registry import DEFAULT_PROFILE, SUPPORTED_PROFILES
 from validation.engine_comparison import COMPARISON_PATH, run_engine_comparison
 
 DEFAULT_SOURCE_JSONL = PROJECT_ROOT / "openfoodfacts-products.jsonl"
@@ -38,8 +40,23 @@ def _inject_theme() -> None:
         """
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0,0');
         html, body, [class*="st-"], [class*="css"] {
             font-family: "Space Grotesk", sans-serif;
+        }
+        [class^="material-symbols"], [class*=" material-symbols"] {
+            font-family: "Material Symbols Rounded" !important;
+            font-weight: normal;
+            font-style: normal;
+            font-size: 1rem;
+            line-height: 1;
+            letter-spacing: normal;
+            text-transform: none;
+            display: inline-block;
+            white-space: nowrap;
+            word-wrap: normal;
+            direction: ltr;
+            -webkit-font-smoothing: antialiased;
         }
         .block-container {
             max-width: 1260px;
@@ -61,30 +78,35 @@ def _inject_theme() -> None:
             line-height: 1.15;
         }
         .stat-chip {
-            border-radius: 14px;
+            border-radius: 16px;
             border: 1px solid #dbeafe;
             background: linear-gradient(135deg, #f8fafc 0%, #ecfeff 100%);
-            padding: 0.70rem 0.85rem;
-            min-height: 104px;
+            padding: 0.8rem 0.95rem;
+            min-height: 112px;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            overflow-wrap: anywhere;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
         }
         .stat-chip .label {
             color: #475569;
-            font-size: 0.78rem;
+            font-size: 0.76rem;
             line-height: 1.1rem;
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.03em;
+            letter-spacing: 0.04em;
+            word-break: normal;
+            overflow-wrap: break-word;
         }
         .stat-chip .value {
             color: #0f172a;
-            font-size: 1.22rem;
+            font-size: 1.28rem;
             font-weight: 700;
-            line-height: 1.35rem;
-            margin-top: 0.45rem;
+            line-height: 1.4rem;
+            margin-top: 0.5rem;
+            white-space: normal;
+            word-break: break-word;
         }
         .hero {
             border-radius: 16px;
@@ -103,6 +125,47 @@ def _inject_theme() -> None:
             margin: 0.3rem 0 0 0;
             color: #334155;
             font-size: 0.95rem;
+        }
+        .explain-chip {
+            border-radius: 14px;
+            border: 1px solid #bfdbfe;
+            background: linear-gradient(135deg, #eff6ff 0%, #f0f9ff 100%);
+            padding: 0.8rem 0.95rem;
+            margin: 0.6rem 0 0.9rem 0;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+        }
+        .explain-chip .title {
+            color: #1e3a8a;
+            font-size: 0.88rem;
+            line-height: 1.2rem;
+            font-weight: 700;
+            margin-bottom: 0.35rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .explain-chip ul {
+            margin: 0.1rem 0 0 1rem;
+            padding: 0;
+        }
+        .explain-chip li {
+            color: #1e293b;
+            font-size: 0.92rem;
+            line-height: 1.35rem;
+            margin: 0.2rem 0;
+        }
+        [data-testid="stExpander"] > details > summary {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            line-height: 1.25;
+        }
+        [data-testid="stExpander"] > details > summary p {
+            margin: 0 !important;
+            line-height: 1.25 !important;
+        }
+        [data-testid="stExpander"] > details > summary svg {
+            flex-shrink: 0;
+            margin-top: 0 !important;
         }
         </style>
         """,
@@ -123,6 +186,19 @@ def _render_stat_chip(label: str, value: object) -> None:
             "<div class='stat-chip'>"
             f"<div class='label'>{label}</div>"
             f"<div class='value'>{value}</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _render_explain_chip(title: str, lines: List[str]) -> None:
+    safe_items = "".join(f"<li>{html.escape(line)}</li>" for line in lines if line)
+    st.markdown(
+        (
+            "<div class='explain-chip'>"
+            f"<div class='title'>{html.escape(title)}</div>"
+            f"<ul>{safe_items}</ul>"
             "</div>"
         ),
         unsafe_allow_html=True,
@@ -184,6 +260,10 @@ def _rule_frame(rule_comparison: List[Mapping[str, object]]) -> pd.DataFrame:
                 "condition_type": item.get("condition_type", "unknown"),
                 "complexity": item.get("complexity", "unknown"),
                 "declarative_friendly": bool(item.get("declarative_friendly", False)),
+                "jurisdiction": str(item.get("jurisdiction", "global")),
+                "regulatory_type": str(item.get("regulatory_type", "")),
+                "legal_citation": str(item.get("legal_citation", "")),
+                "review_status": str(item.get("review_status", "")),
                 "products_tested": int(item.get("products_tested", 0)),
                 "best_engine": best_engine,
                 "best_effective_pct": _to_pct(effective_confidences.get(best_engine, 0.0)),
@@ -346,6 +426,7 @@ def main() -> None:
         llm_provider = "groq"
         st.caption("Python engine uses Groq for LLM conversion in this dashboard.")
         llm_model = st.text_input("LLM model override", value="openai/gpt-oss-120b")
+        profile = st.selectbox("Rule profile", options=list(SUPPORTED_PROFILES), index=list(SUPPORTED_PROFILES).index(DEFAULT_PROFILE))
         has_groq_key = bool(os.getenv("GROQ_API_KEY"))
         if not has_groq_key:
             st.warning("GROQ_API_KEY is not set. Python engine will fall back unless key is provided.")
@@ -365,6 +446,7 @@ def main() -> None:
                         perl_rules_dir=Path(perl_rules_dir_text) if perl_rules_dir_text.strip() else None,
                         results_path=COMPARISON_PATH,
                         require_real_llm=True,
+                        profile=profile,
                     )
                 st.success("Comparison completed.")
             except Exception as exc:  # noqa: BLE001
@@ -390,17 +472,27 @@ def main() -> None:
     dbt_wins = int((frame["best_engine"] == "dbt").sum())
     soda_wins = int((frame["best_engine"] == "soda").sum())
     avg_best = frame["best_effective_pct"].mean()
+    canada_rules = int((frame["jurisdiction"] == "ca").sum()) if "jurisdiction" in frame.columns else 0
 
-    m1, m2, m3, m4, m5 = st.columns(5, gap="large")
-    m1.metric("Rules compared", len(frame))
-    m2.metric("Python wins", python_wins)
-    m3.metric("dbt wins", dbt_wins)
-    m4.metric("Soda wins", soda_wins)
-    m5.metric("Avg best effective %", f"{avg_best:.2f}%")
+    k1, k2, k3 = st.columns(3, gap="large")
+    with k1:
+        _render_stat_chip("Rules compared", len(frame))
+    with k2:
+        _render_stat_chip("Python wins", python_wins)
+    with k3:
+        _render_stat_chip("dbt wins", dbt_wins)
+    k4, k5, k6 = st.columns(3, gap="large")
+    with k4:
+        _render_stat_chip("Soda wins", soda_wins)
+    with k5:
+        _render_stat_chip("Avg best effective %", f"{avg_best:.2f}%")
+    with k6:
+        _render_stat_chip("Canada rules", canada_rules)
 
     st.caption(f"Generated at: {payload.get('generated_at_utc', 'n/a')}")
     st.caption(f"Dataset size: {dataset.get('products_tested', 'n/a')}")
     st.caption(f"Dataset source: {dataset.get('source_jsonl', 'n/a')}")
+    st.caption(f"Profile: {dataset.get('profile', DEFAULT_PROFILE)}")
     st.caption(
         "Confidence context: we compare engines using effective confidence "
         "(overall confidence x provider factor), with status and mismatches prioritized."
@@ -409,21 +501,22 @@ def main() -> None:
         st.caption(
             f"LLM provider={run_config.get('llm_provider', 'n/a')} | "
             f"GROQ key set={run_config.get('groq_api_key_set')} | "
-            f"Require real LLM={run_config.get('require_real_llm')}"
+            f"Require real LLM={run_config.get('require_real_llm')} | "
+            f"Run profile={run_config.get('profile', DEFAULT_PROFILE)}"
         )
-    with st.expander("How best migration is chosen"):
-        st.markdown(
-            str(
-                comparison_method.get(
-                    "best_engine_ranking",
-                    "Prefer MATCH status, then fewer mismatches, then higher effective confidence.",
-                )
+    selection_lines: List[str] = [
+        str(
+            comparison_method.get(
+                "best_engine_ranking",
+                "Prefer MATCH status, then fewer mismatches, then higher effective confidence.",
             )
         )
-        if comparison_method.get("hybrid_tie_break"):
-            st.markdown(str(comparison_method["hybrid_tie_break"]))
-        if comparison_method.get("declarative_tie_break"):
-            st.markdown(str(comparison_method["declarative_tie_break"]))
+    ]
+    if comparison_method.get("hybrid_tie_break"):
+        selection_lines.append(str(comparison_method["hybrid_tie_break"]))
+    if comparison_method.get("declarative_tie_break"):
+        selection_lines.append(str(comparison_method["declarative_tie_break"]))
+    _render_explain_chip("How Best Migration Is Chosen", selection_lines)
 
     st.subheader("Engine Summary")
     summary_frame = _engine_summary_frame(engine_summary)
@@ -473,40 +566,57 @@ def main() -> None:
         st.plotly_chart(_build_best_engine_chart(frame), use_container_width=True)
 
     st.subheader("Rule Validation Table (Comparison View)")
+    show_advanced = st.checkbox("Show advanced metrics", value=False)
     show_providers = st.checkbox("Show provider columns", value=False)
+    jurisdictions = sorted(frame["jurisdiction"].dropna().unique().tolist())
+    selected_jurisdictions = st.multiselect("Filter jurisdiction", options=jurisdictions, default=jurisdictions)
+    table_frame = frame[frame["jurisdiction"].isin(selected_jurisdictions)] if selected_jurisdictions else frame
     columns = [
         "rule_name",
+        "jurisdiction",
+        "regulatory_type",
+        "review_status",
+        "legal_citation",
         "complexity",
         "condition_type",
         "severity",
         "best_engine",
         "best_effective_pct",
-        "best_decision_score",
-        "effective_margin_pct",
         "decision_margin",
-        "python_effective_pct",
-        "dbt_effective_pct",
-        "soda_effective_pct",
-        "python_equivalence_pct",
-        "python_mutation_pct",
-        "python_verification_pct",
-        "python_repair_applied",
-        "python_mismatches",
-        "dbt_mismatches",
-        "soda_mismatches",
-        "python_real_llm",
-        "declarative_tie_break_applied",
-        "selection_reason",
         "recommendation",
     ]
+    if show_advanced:
+        columns.extend(
+            [
+                "best_decision_score",
+                "effective_margin_pct",
+                "python_effective_pct",
+                "dbt_effective_pct",
+                "soda_effective_pct",
+                "python_equivalence_pct",
+                "python_mutation_pct",
+                "python_verification_pct",
+                "python_repair_applied",
+                "python_mismatches",
+                "dbt_mismatches",
+                "soda_mismatches",
+                "python_real_llm",
+                "declarative_tie_break_applied",
+                "selection_reason",
+            ]
+        )
     if show_providers:
         columns.extend(["python_provider", "dbt_provider", "soda_provider"])
     st.dataframe(
-        frame[columns],
+        table_frame[columns],
         use_container_width=True,
         hide_index=True,
         column_config={
             "rule_name": st.column_config.TextColumn("Rule"),
+            "jurisdiction": st.column_config.TextColumn("Jurisdiction"),
+            "regulatory_type": st.column_config.TextColumn("Regulatory type"),
+            "review_status": st.column_config.TextColumn("Review status"),
+            "legal_citation": st.column_config.TextColumn("Legal citation"),
             "complexity": st.column_config.TextColumn("Complexity"),
             "condition_type": st.column_config.TextColumn("Condition type"),
             "severity": st.column_config.TextColumn("Severity"),
@@ -540,7 +650,7 @@ def main() -> None:
     selected_rule_name = st.selectbox("Select rule", rule_names)
     selected_rule = next(row for row in rule_comparison if row.get("rule_name") == selected_rule_name)
 
-    d1, d2, d3, d4, d5 = st.columns(5, gap="medium")
+    d1, d2, d3 = st.columns(3, gap="large")
     with d1:
         _render_stat_chip("Best migration", str(selected_rule.get("best_engine", "n/a")).upper())
     with d2:
@@ -549,9 +659,10 @@ def main() -> None:
         _render_stat_chip("Products tested", int(selected_rule.get("products_tested", 0)))
     best_engine = str(selected_rule.get("best_engine", "python"))
     best_effective = selected_rule.get("engines", {}).get(best_engine, {}).get("effective_confidence", 0.0)
+    detail_row = frame.loc[frame["rule_name"] == selected_rule_name].iloc[0]
+    d4, d5 = st.columns(2, gap="large")
     with d4:
         _render_stat_chip("Best effective %", f"{_to_pct(best_effective):.2f}")
-    detail_row = frame.loc[frame["rule_name"] == selected_rule_name].iloc[0]
     with d5:
         _render_stat_chip("Decision margin", f"{float(detail_row['decision_margin']):.4f}")
 
@@ -560,6 +671,18 @@ def main() -> None:
     st.caption(f"Condition type: {selected_rule.get('condition_type', 'n/a')}")
     st.caption(f"Complexity tier: {selected_rule.get('complexity', 'n/a')}")
     st.caption(f"Declarative friendly: {selected_rule.get('declarative_friendly', 'n/a')}")
+    st.caption(f"Jurisdiction: {selected_rule.get('jurisdiction', 'global')}")
+    st.caption(f"Regulatory type: {selected_rule.get('regulatory_type', 'n/a')}")
+    st.caption(f"Legal citation: {selected_rule.get('legal_citation', 'n/a')}")
+    source_url = str(selected_rule.get("source_url", "")).strip()
+    if source_url:
+        st.markdown(f"Source URL: [{source_url}]({source_url})")
+    else:
+        st.caption("Source URL: n/a")
+    st.caption(f"Effective date: {selected_rule.get('effective_date', 'n/a')}")
+    st.caption(f"Review status: {selected_rule.get('review_status', 'n/a')}")
+    st.caption(f"Reviewer: {selected_rule.get('reviewer', 'n/a')}")
+    st.caption(f"Exemption logic: {selected_rule.get('exemption_logic', 'n/a')}")
     st.caption(f"Selection reason: {selected_rule.get('selection_reason', 'n/a')}")
     st.caption(f"dbt/soda explicit tie-break applied: {selected_rule.get('declarative_tie_break_applied', False)}")
     st.caption(f"Recommendation: {selected_rule.get('recommendation', 'n/a')}")

@@ -8,7 +8,7 @@ def test_extract_rules_from_perl_files() -> None:
     snippets = load_rule_snippets_from_directory(RULE_FILES_DIR)
     rules = extract_rules(snippets)
 
-    assert len(rules) >= 14
+    assert len(rules) >= 19
     names = {rule["rule_name"] for rule in rules}
     assert "energy_kcal_vs_kj" in names
     assert "main_language_code_missing" in names
@@ -16,6 +16,8 @@ def test_extract_rules_from_perl_files() -> None:
     assert "energy_kj_computed_mismatch_low" in names
     assert "energy_kj_computed_mismatch_high" in names
     assert "sugars_plus_starch_vs_carbohydrates" in names
+    assert "ca_fop_required_but_symbol_missing" in names
+    assert "ca_contains_statement_without_allergen_evidence" in names
 
     missing_rule = next(rule for rule in rules if rule["rule_name"] == "main_language_code_missing")
     assert missing_rule["condition_type"] == "missing_field"
@@ -41,6 +43,10 @@ def test_extract_rules_from_perl_files() -> None:
     assert computed_rule["right_operand"] == "energy_kj"
     assert computed_rule["scale_factor"] == 0.7
     assert computed_rule["offset"] == -5.0
+
+    ca_fop_rule = next(rule for rule in rules if rule["rule_name"] == "ca_fop_required_but_symbol_missing")
+    assert ca_fop_rule["condition_type"] == "compound_threshold_and"
+    assert ca_fop_rule["complexity"] == "medium"
 
 
 def test_perl_rule_files_are_present() -> None:

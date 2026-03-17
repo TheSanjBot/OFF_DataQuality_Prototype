@@ -21,6 +21,7 @@ from extractor.perl_logic_extractor import extract_rules
 from migration.llm_converter import convert_rules, repair_conversion_with_counterexamples
 from perl_checks.legacy_checks import LEGACY_RULES, get_legacy_rule_map, get_perl_rule_snippets, run_perl_checks
 from python_checks.generated_checks import compile_generated_checks
+from rulepacks.registry import DEFAULT_PROFILE, SUPPORTED_PROFILES, attach_profile_metadata, get_profile_rule_names, validate_profile
 from validation.verification import run_rule_verification
 
 RESULT_PATH = Path(__file__).resolve().parent.parent / "results" / "migration_results.json"
@@ -150,8 +151,9 @@ def _run_python_verification(
     python_checks: Mapping[str, object],
     conversion_metadata: Mapping[str, Mapping[str, object]],
     seed: int,
+    legacy_rules: Sequence[object],
 ) -> Dict[str, Dict[str, object]]:
-    legacy_map = get_legacy_rule_map(LEGACY_RULES)
+    legacy_map = get_legacy_rule_map(legacy_rules)
     verification_by_rule: Dict[str, Dict[str, object]] = {}
     for rule in structured_rules:
         rule_name = str(rule["rule_name"])
@@ -206,6 +208,14 @@ def _build_failed_case_rows(
                 "carbohydrates": product.get("carbohydrates"),
                 "sugars": product.get("sugars"),
                 "starch": product.get("starch"),
+                "sodium": product.get("sodium"),
+                "ingredients_text_present": product.get("ingredients_text_present"),
+                "contains_statement_present": product.get("contains_statement_present"),
+                "allergen_evidence_present": product.get("allergen_evidence_present"),
+                "fop_threshold_exceeded": product.get("fop_threshold_exceeded"),
+                "fop_symbol_present": product.get("fop_symbol_present"),
+                "fop_exempt_proxy": product.get("fop_exempt_proxy"),
+                "product_is_prepackaged_proxy": product.get("product_is_prepackaged_proxy"),
                 "lc": product.get("lc"),
                 "lang": product.get("lang"),
                 "language_code": product.get("language_code"),
@@ -264,6 +274,17 @@ def _compute_rule_result(
         "tag": rule["tag"],
         "severity": rule["severity"],
         "condition": rule["condition"],
+        "jurisdiction": rule.get("jurisdiction", "global"),
+        "profile_tags": list(rule.get("profile_tags", [])),
+        "regulatory_type": rule.get("regulatory_type", ""),
+        "legal_citation": rule.get("legal_citation", ""),
+        "source_url": rule.get("source_url", ""),
+        "effective_date": rule.get("effective_date", ""),
+        "review_status": rule.get("review_status", ""),
+        "reviewer": rule.get("reviewer", ""),
+        "required_fields": list(rule.get("required_fields", [])),
+        "exemption_logic": rule.get("exemption_logic", ""),
+        "rule_notes": rule.get("rule_notes", ""),
         "rule_ir": rule.get("rule_ir"),
         "rule_ir_hash": rule.get("rule_ir_hash"),
         "condition_type": rule.get("condition_type", "unknown"),
@@ -339,10 +360,17 @@ def run_pipeline(
     llm_model: str | None = None,
     perl_rules_dir: Path | None = None,
     execution_engine: str = "python",
+    profile: str = DEFAULT_PROFILE,
 ) -> Dict[str, object]:
     """Run the full migration prototype pipeline and persist JSON results."""
     if execution_engine not in {"python", "dbt", "soda"}:
         raise ValueError("execution_engine must be one of: python, dbt, soda")
+
+    profile_name = validate_profile(profile)
+    selected_rule_names = set(get_profile_rule_names(profile_name, [rule.rule_name for rule in LEGACY_RULES]))
+    selected_legacy_rules = [rule for rule in LEGACY_RULES if rule.rule_name in selected_rule_names]
+    if not selected_legacy_rules:
+        raise ValueError(f"No legacy rules selected for profile `{profile_name}`.")
 
     source_path = source_jsonl
     if source_path is None and use_default_off_source and DEFAULT_OFF_JSONL.exists():
@@ -351,8 +379,16 @@ def run_pipeline(
     products = create_and_load_dataset(size=dataset_size, seed=seed, db_path=db_path, source_jsonl=source_path)
     product_map = {str(product["product_id"]): product for product in products}
 
-    perl_output = run_perl_checks(products, LEGACY_RULES)
-    structured_rules = extract_rules(get_perl_rule_snippets(LEGACY_RULES, rules_dir=perl_rules_dir))
+    perl_output = run_perl_checks(products, selected_legacy_rules)
+    if perl_rules_dir is None:
+        structured_rules_raw = extract_rules(get_perl_rule_snippets(selected_legacy_rules, rules_dir=None))
+    else:
+        all_structured = extract_rules(get_perl_rule_snippets(LEGACY_RULES, rules_dir=perl_rules_dir))
+        structured_rules_raw = [rule for rule in all_structured if str(rule["rule_name"]) in selected_rule_names]
+    structured_rules = attach_profile_metadata(structured_rules_raw, profile=profile_name)
+    if not structured_rules:
+        raise ValueError(f"No structured rules extracted for profile `{profile_name}`.")
+
     engine_run: Dict[str, object] | None = None
     verification_by_rule: Dict[str, Dict[str, object]] = {}
 
@@ -376,6 +412,7 @@ def run_pipeline(
             python_checks=python_checks,
             conversion_metadata=conversion_metadata,
             seed=seed,
+            legacy_rules=selected_legacy_rules,
         )
 
         if llm_provider == "groq":
@@ -411,6 +448,7 @@ def run_pipeline(
             python_checks=python_checks,
             conversion_metadata=conversion_metadata,
             seed=seed,
+            legacy_rules=selected_legacy_rules,
         )
         for rule in structured_rules:
             rule_name = str(rule["rule_name"])
@@ -458,6 +496,8 @@ def run_pipeline(
             "source_jsonl": str(source_path) if source_path else "synthetic",
             "perl_rules_source": str(perl_rules_dir) if perl_rules_dir else "inline_legacy_rules",
             "execution_engine": execution_engine,
+            "profile": profile_name,
+            "profile_rule_count": len(structured_rules),
         },
         "migration_summary": {
             "total_rules": total_rules,
@@ -514,6 +554,12 @@ def parse_args() -> argparse.Namespace:
         default="python",
         help="Check execution engine for parity target: python (LLM converted), dbt, or soda.",
     )
+    parser.add_argument(
+        "--profile",
+        choices=list(SUPPORTED_PROFILES),
+        default=DEFAULT_PROFILE,
+        help="Rule-pack profile to execute: global, canada, or hybrid.",
+    )
     return parser.parse_args()
 
 
@@ -527,6 +573,7 @@ def main() -> None:
         llm_model=args.llm_model,
         perl_rules_dir=args.perl_rules_dir,
         execution_engine=args.execution_engine,
+        profile=args.profile,
     )
     summary = results["migration_summary"]
     print(f"Rules analyzed: {summary['total_rules']}")
@@ -534,6 +581,7 @@ def main() -> None:
     print(f"Rules needing review: {summary['rules_needing_review']}")
     print(f"Dataset source: {results['dataset']['source_jsonl']}")
     print(f"Execution engine: {results['dataset'].get('execution_engine', 'python')}")
+    print(f"Profile: {results['dataset'].get('profile', DEFAULT_PROFILE)}")
     print(f"Results written to: {RESULT_PATH}")
 
 

@@ -38,7 +38,7 @@ SUM_FIELDS_COMPARE_RE = re.compile(
 )
 IF_CONDITION_RE = re.compile(r"if\s*\(\s*(?P<condition>.*?)\s*\)\s*\{", re.DOTALL)
 THRESHOLD_CLAUSE_RE = re.compile(
-    r"^\s*\$(?P<left>[a-zA-Z_]\w*)\s*(?P<op>>=|<=|>|<|==|!=)\s*(?P<right>\d+(?:\.\d+)?)\s*$"
+    r"^\s*\(?\s*\$(?P<left>[a-zA-Z_]\w*)\s*(?P<op>>=|<=|>|<|==|!=)\s*(?P<right>\d+(?:\.\d+)?)\s*\)?\s*$"
 )
 
 

@@ -216,6 +216,13 @@ def _validate_generated_code(code: str, function_name: str) -> None:
             "carbohydrates": None,
             "sugars": None,
             "language_code": None,
+            "ingredients_text_present": None,
+            "contains_statement_present": None,
+            "allergen_evidence_present": None,
+            "fop_threshold_exceeded": None,
+            "fop_symbol_present": None,
+            "fop_exempt_proxy": None,
+            "product_is_prepackaged_proxy": None,
         },
         {
             "energy_kj": 100.0,
@@ -226,6 +233,13 @@ def _validate_generated_code(code: str, function_name: str) -> None:
             "carbohydrates": 15.0,
             "sugars": 5.0,
             "language_code": "en",
+            "ingredients_text_present": 1,
+            "contains_statement_present": 0,
+            "allergen_evidence_present": 0,
+            "fop_threshold_exceeded": 0,
+            "fop_symbol_present": 0,
+            "fop_exempt_proxy": 0,
+            "product_is_prepackaged_proxy": 1,
         },
     ]
     for product in probe_products:
