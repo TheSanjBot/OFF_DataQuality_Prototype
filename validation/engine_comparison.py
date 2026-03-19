@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
 from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
+from uuid import uuid4
 
 from data.load_dataset import DB_PATH, DEFAULT_OFF_JSONL
 from rulepacks.registry import DEFAULT_PROFILE, SUPPORTED_PROFILES
@@ -23,6 +24,55 @@ def _line_count(text: object) -> int:
     if not snippet:
         return 0
     return len(snippet.splitlines())
+
+
+def _comparison_fingerprint_payload(
+    engine_payloads: Mapping[str, Mapping[str, object]],
+    generated_at_utc: str,
+) -> Dict[str, object]:
+    engine_run_ids: Dict[str, str] = {}
+    dataset_hashes: Dict[str, str] = {}
+    rulepack_hashes: Dict[str, str] = {}
+    commits: Dict[str, str] = {}
+
+    for engine, payload in engine_payloads.items():
+        run_fp = payload.get("run_fingerprint", {})
+        engine_run_ids[engine] = str(run_fp.get("run_id", ""))
+        commits[engine] = str(run_fp.get("code_commit", "unknown"))
+        dataset_fp = run_fp.get("dataset_fingerprint", {})
+        rulepack_fp = run_fp.get("rulepack_fingerprint", {})
+        dataset_hashes[engine] = str(dataset_fp.get("sha256", ""))
+        rulepack_hashes[engine] = str(rulepack_fp.get("rule_ir_sha256", ""))
+
+    dataset_unique = sorted({value for value in dataset_hashes.values() if value})
+    rulepack_unique = sorted({value for value in rulepack_hashes.values() if value})
+    commit_unique = sorted({value for value in commits.values() if value and value != "unknown"})
+
+    safe_timestamp = generated_at_utc.replace(":", "").replace("-", "").replace(".", "").replace("+", "p")
+    comparison_run_id = f"comparison_{safe_timestamp}_{uuid4().hex[:8]}"
+    comparison_sha_input = {
+        "engine_run_ids": engine_run_ids,
+        "dataset_hashes": dataset_hashes,
+        "rulepack_hashes": rulepack_hashes,
+        "generated_at_utc": generated_at_utc,
+    }
+    comparison_sha = hashlib.sha256(
+        json.dumps(comparison_sha_input, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+    return {
+        "comparison_run_id": comparison_run_id,
+        "comparison_sha256": comparison_sha,
+        "engine_run_ids": engine_run_ids,
+        "dataset_fingerprint_sha256_by_engine": dataset_hashes,
+        "rulepack_fingerprint_sha256_by_engine": rulepack_hashes,
+        "dataset_fingerprint_consistent": len(dataset_unique) <= 1,
+        "rulepack_fingerprint_consistent": len(rulepack_unique) <= 1,
+        "dataset_fingerprint_sha256": dataset_unique[0] if dataset_unique else "",
+        "rulepack_fingerprint_sha256": rulepack_unique[0] if rulepack_unique else "",
+        "code_commit": commit_unique[0] if len(commit_unique) == 1 else "mixed_or_unknown",
+        "code_commits_by_engine": commits,
+    }
 
 
 def _is_fallback_provider(provider: str) -> bool:
@@ -49,6 +99,8 @@ def _provider_factor(engine: str, provider: str) -> float:
             return 0.85
         return 0.9
     if engine == "soda":
+        if normalized == "soda_cloud":
+            return 1.0
         if normalized == "soda_core":
             return 1.0
         if normalized == "soda_core_sql_fallback":
@@ -387,6 +439,10 @@ def _build_rule_comparison(engine_payloads: Mapping[str, Mapping[str, object]]) 
                 "decision_score": round(_decision_score(engine, row, rule_out["declarative_friendly"]), 4),
                 "conversion_provider": provider,
                 "conversion_notes": row.get("conversion_notes", ""),
+                "execution_mode": row.get("conversion_execution_mode", ""),
+                "cloud_connected": bool(row.get("conversion_cloud_connected", False)),
+                "cloud_scan_id": row.get("conversion_cloud_scan_id", ""),
+                "cloud_scan_url": row.get("conversion_cloud_scan_url", ""),
                 "conversion_artifact": conversion_text,
                 "conversion_lines": _line_count(conversion_text),
                 "failed_test_cases": row.get("failed_test_cases", []),
@@ -405,6 +461,7 @@ def _run_for_engines(
     perl_rules_dir: Path | None,
     db_path: Path,
     profile: str,
+    soda_mode: str,
 ) -> Dict[str, Dict[str, object]]:
     engine_payloads: Dict[str, Dict[str, object]] = {}
     temp_results_dir = RESULT_PATH.parent / "tmp_engine_runs"
@@ -423,6 +480,7 @@ def _run_for_engines(
             llm_model=llm_model,
             perl_rules_dir=perl_rules_dir,
             execution_engine=engine,
+            soda_mode=soda_mode,
             profile=profile,
         )
         engine_payloads[engine] = payload
@@ -441,6 +499,7 @@ def run_engine_comparison(
     results_path: Path = COMPARISON_PATH,
     require_real_llm: bool = False,
     profile: str = DEFAULT_PROFILE,
+    soda_mode: str = "local",
 ) -> Dict[str, object]:
     """Run all engines and emit a rule-by-rule comparison report."""
     engine_payloads = _run_for_engines(
@@ -453,6 +512,7 @@ def run_engine_comparison(
         perl_rules_dir=perl_rules_dir,
         db_path=db_path,
         profile=profile,
+        soda_mode=soda_mode,
     )
     if require_real_llm:
         python_rows = list(engine_payloads.get("python", {}).get("rule_results", []))
@@ -472,9 +532,15 @@ def run_engine_comparison(
     per_engine_summary = {engine: _engine_summary(engine, payload) for engine, payload in engine_payloads.items()}
     rule_comparison = _build_rule_comparison(engine_payloads)
     complexity_summary = _build_complexity_summary(rule_comparison)
+    generated_at_utc = datetime.now(timezone.utc).isoformat()
+    comparison_fingerprint = _comparison_fingerprint_payload(
+        engine_payloads=engine_payloads,
+        generated_at_utc=generated_at_utc,
+    )
 
     report = {
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at_utc": generated_at_utc,
+        "comparison_fingerprint": comparison_fingerprint,
         "comparison_method": {
             "best_engine_ranking": (
                 "Prefer MATCH status, then fewer mismatches, then higher effective_confidence. "
@@ -497,11 +563,16 @@ def run_engine_comparison(
                 "python_real_llm": 1.0,
                 "python_simulated_fallback": 0.55,
                 "dbt_sql_fallback": 0.85,
+                "soda_cloud": 1.0,
                 "soda_sql_fallback": 0.85,
             },
         },
         "dataset": dataset_meta,
         "engines": list(ENGINES),
+        "engine_run_fingerprints": {
+            engine: payload.get("run_fingerprint", {})
+            for engine, payload in engine_payloads.items()
+        },
         "per_engine_summary": per_engine_summary,
         "per_complexity_summary": complexity_summary,
         "rule_comparison": rule_comparison,
@@ -511,6 +582,16 @@ def run_engine_comparison(
             "require_real_llm": require_real_llm,
             "groq_api_key_set": bool(os.getenv("GROQ_API_KEY")),
             "profile": profile,
+            "dataset_size": dataset_size,
+            "seed": seed,
+            "mode": "off" if use_default_off_source else "synthetic",
+            "source_jsonl": str(source_jsonl) if source_jsonl else "",
+            "soda_mode": soda_mode,
+            "soda_cloud_credentials_set": bool(
+                os.getenv("SODA_CLOUD_API_KEY_ID")
+                and os.getenv("SODA_CLOUD_API_KEY_SECRET")
+                and os.getenv("SODA_CLOUD_HOST")
+            ),
         },
     }
 
@@ -556,6 +637,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Fail if python engine did not use real LLM providers (no simulated fallback allowed).",
     )
+    parser.add_argument(
+        "--soda-mode",
+        choices=["local", "cloud"],
+        default="local",
+        help="Soda execution mode for soda engine runs.",
+    )
     return parser.parse_args()
 
 
@@ -575,6 +662,7 @@ def main() -> None:
         results_path=args.results_path,
         require_real_llm=args.require_real_llm,
         profile=args.profile,
+        soda_mode=args.soda_mode,
     )
     print(f"Engines compared: {', '.join(report['engines'])}")
     for engine, summary in report["per_engine_summary"].items():
@@ -591,6 +679,15 @@ def main() -> None:
         )
     if report.get("dataset"):
         print(f"Profile: {report['dataset'].get('profile', DEFAULT_PROFILE)}")
+    print(f"Soda mode: {args.soda_mode}")
+    if report.get("comparison_fingerprint"):
+        fingerprint = report["comparison_fingerprint"]
+        print(f"Comparison run ID: {fingerprint.get('comparison_run_id', 'n/a')}")
+        print(
+            "Fingerprints: "
+            f"dataset={str(fingerprint.get('dataset_fingerprint_sha256', ''))[:16]} | "
+            f"rulepack={str(fingerprint.get('rulepack_fingerprint_sha256', ''))[:16]}"
+        )
     print(f"Comparison written to: {args.results_path}")
 
 

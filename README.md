@@ -104,6 +104,7 @@ Optional: run declarative parity target via `dbt` or `soda`:
 ```bash
 python -m validation.parity_validator --size 300 --execution-engine dbt
 python -m validation.parity_validator --size 300 --execution-engine soda
+python -m validation.parity_validator --size 300 --execution-engine soda --soda-mode cloud
 ```
 
 Notes for declarative engines:
@@ -131,6 +132,12 @@ and writes a unified report:
 
 ```bash
 python -m validation.engine_comparison --size 300 --mode off --llm-provider groq
+```
+
+Soda Cloud mode (attempt cloud scan first, then fallback to local Soda runner if unavailable):
+
+```bash
+python -m validation.engine_comparison --size 300 --mode off --llm-provider groq --soda-mode cloud
 ```
 
 Run a specific rule-pack profile:

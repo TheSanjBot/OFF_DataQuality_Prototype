@@ -381,6 +381,10 @@ def _engine_detail_frame(selected_rule: Mapping[str, object]) -> pd.DataFrame:
                 "mismatches": int(row.get("mismatches", 0)),
                 "provider_factor_pct": _to_pct(row.get("provider_factor", 0.0)),
                 "provider": row.get("conversion_provider", ""),
+                "execution_mode": row.get("execution_mode", ""),
+                "cloud_connected": bool(row.get("cloud_connected", False)),
+                "cloud_scan_id": row.get("cloud_scan_id", ""),
+                "cloud_scan_url": row.get("cloud_scan_url", ""),
                 "real_llm_used": bool(row.get("real_llm_used")) if engine == "python" else None,
                 "repair_applied": bool(row.get("counterexample_repair_applied", False)) if engine == "python" else None,
                 "artifact_lines": int(row.get("conversion_lines", 0)),
@@ -426,6 +430,12 @@ def main() -> None:
         llm_provider = "groq"
         st.caption("Python engine uses Groq for LLM conversion in this dashboard.")
         llm_model = st.text_input("LLM model override", value="openai/gpt-oss-120b")
+        soda_mode = st.selectbox(
+            "Soda mode",
+            options=["local", "cloud"],
+            index=0,
+            help="Use `cloud` to attempt Soda Cloud scan publishing; falls back to local if unavailable.",
+        )
         profile = st.selectbox("Rule profile", options=list(SUPPORTED_PROFILES), index=list(SUPPORTED_PROFILES).index(DEFAULT_PROFILE))
         has_groq_key = bool(os.getenv("GROQ_API_KEY"))
         if not has_groq_key:
@@ -447,6 +457,7 @@ def main() -> None:
                         results_path=COMPARISON_PATH,
                         require_real_llm=True,
                         profile=profile,
+                        soda_mode=soda_mode,
                     )
                 st.success("Comparison completed.")
             except Exception as exc:  # noqa: BLE001
@@ -463,6 +474,7 @@ def main() -> None:
     complexity_summary = payload.get("per_complexity_summary", {})
     run_config = payload.get("run_config", {})
     comparison_method = payload.get("comparison_method", {})
+    comparison_fingerprint = payload.get("comparison_fingerprint", {})
     frame = _rule_frame(rule_comparison)
     if frame.empty:
         st.warning("Comparison report has no rule rows.")
@@ -502,7 +514,24 @@ def main() -> None:
             f"LLM provider={run_config.get('llm_provider', 'n/a')} | "
             f"GROQ key set={run_config.get('groq_api_key_set')} | "
             f"Require real LLM={run_config.get('require_real_llm')} | "
-            f"Run profile={run_config.get('profile', DEFAULT_PROFILE)}"
+            f"Run profile={run_config.get('profile', DEFAULT_PROFILE)} | "
+            f"Soda mode={run_config.get('soda_mode', 'local')} | "
+            f"Soda Cloud creds set={run_config.get('soda_cloud_credentials_set', False)}"
+        )
+    if comparison_fingerprint:
+        st.caption(
+            f"Comparison run ID: {comparison_fingerprint.get('comparison_run_id', 'n/a')} | "
+            f"Run SHA: {str(comparison_fingerprint.get('comparison_sha256', ''))[:12]}"
+        )
+        st.caption(
+            f"Dataset fingerprint: {str(comparison_fingerprint.get('dataset_fingerprint_sha256', ''))[:16]} | "
+            f"Rulepack fingerprint: {str(comparison_fingerprint.get('rulepack_fingerprint_sha256', ''))[:16]} | "
+            f"Commit: {str(comparison_fingerprint.get('code_commit', 'unknown'))[:12]}"
+        )
+        st.caption(
+            f"Cross-engine consistency -> "
+            f"dataset={comparison_fingerprint.get('dataset_fingerprint_consistent', False)} | "
+            f"rulepack={comparison_fingerprint.get('rulepack_fingerprint_consistent', False)}"
         )
     selection_lines: List[str] = [
         str(
@@ -686,6 +715,16 @@ def main() -> None:
     st.caption(f"Selection reason: {selected_rule.get('selection_reason', 'n/a')}")
     st.caption(f"dbt/soda explicit tie-break applied: {selected_rule.get('declarative_tie_break_applied', False)}")
     st.caption(f"Recommendation: {selected_rule.get('recommendation', 'n/a')}")
+    soda_meta = selected_rule.get("engines", {}).get("soda", {})
+    st.caption(
+        "Soda execution: "
+        f"mode={soda_meta.get('execution_mode', 'n/a')} | "
+        f"cloud_connected={soda_meta.get('cloud_connected', False)} | "
+        f"scan_id={soda_meta.get('cloud_scan_id', '') or 'n/a'}"
+    )
+    soda_scan_url = str(soda_meta.get("cloud_scan_url", "")).strip()
+    if soda_scan_url:
+        st.markdown(f"Soda Cloud scan URL: [{soda_scan_url}]({soda_scan_url})")
 
     st.markdown("**Engine metrics for selected rule**")
     st.dataframe(
@@ -705,6 +744,10 @@ def main() -> None:
             "mismatches": st.column_config.NumberColumn("Mismatches", format="%d"),
             "provider_factor_pct": st.column_config.NumberColumn("Provider factor %", format="%.2f"),
             "provider": st.column_config.TextColumn("Provider"),
+            "execution_mode": st.column_config.TextColumn("Execution mode"),
+            "cloud_connected": st.column_config.CheckboxColumn("Cloud connected"),
+            "cloud_scan_id": st.column_config.TextColumn("Cloud scan ID"),
+            "cloud_scan_url": st.column_config.TextColumn("Cloud scan URL"),
             "real_llm_used": st.column_config.CheckboxColumn("Real LLM used"),
             "repair_applied": st.column_config.CheckboxColumn("Repair applied"),
             "artifact_lines": st.column_config.NumberColumn("Artifact lines", format="%d"),

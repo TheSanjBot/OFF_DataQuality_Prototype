@@ -19,3 +19,7 @@ results/tmp_engine_runs/
 # OS/editor
 .DS_Store
 Thumbs.db
+.vscode/
+
+# Local service credentials
+sc_config.yml

@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
 from typing import Dict, List, Mapping, Sequence, Set
+from uuid import uuid4
 
 from declarative.check_runners import run_declarative_checks
 from data.load_dataset import (
@@ -26,6 +29,72 @@ from validation.verification import run_rule_verification
 
 RESULT_PATH = Path(__file__).resolve().parent.parent / "results" / "migration_results.json"
 TABLE_NAME = "nutrition_table"
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _sha256_json(payload: object) -> str:
+    normalized = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    return _sha256_text(normalized)
+
+
+def _resolve_git_commit() -> str:
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=5,
+        )
+        if completed.returncode == 0:
+            value = (completed.stdout or "").strip()
+            if value:
+                return value
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _dataset_fingerprint_payload(
+    products: Sequence[Mapping[str, object]],
+    source_path: Path | None,
+    dataset_size: int,
+    seed: int,
+) -> Dict[str, object]:
+    normalized_products = [
+        {key: product.get(key) for key in sorted(product.keys())}
+        for product in sorted(products, key=lambda row: str(row.get("product_id", "")))
+    ]
+    product_ids = [str(product.get("product_id", "")) for product in normalized_products if product.get("product_id")]
+    source_mode = "off_jsonl" if source_path else "synthetic"
+    payload = {
+        "source_mode": source_mode,
+        "source_jsonl": str(source_path) if source_path else "synthetic",
+        "requested_size": int(dataset_size),
+        "products_tested": len(normalized_products),
+        "seed": int(seed) if source_mode == "synthetic" else None,
+        "product_id_first": product_ids[0] if product_ids else None,
+        "product_id_last": product_ids[-1] if product_ids else None,
+        "sha256": _sha256_json(normalized_products),
+    }
+    return payload
+
+
+def _rulepack_fingerprint_payload(structured_rules: Sequence[Mapping[str, object]], profile_name: str) -> Dict[str, object]:
+    rule_names = sorted(str(rule.get("rule_name", "")) for rule in structured_rules)
+    ir_hashes = sorted(str(rule.get("rule_ir_hash", "")) for rule in structured_rules)
+    payload = {
+        "profile": profile_name,
+        "rule_count": len(structured_rules),
+        "rule_names_sha256": _sha256_json(rule_names),
+        "rule_ir_sha256": _sha256_json(ir_hashes),
+    }
+    return payload
 
 
 def _wilson_interval(successes: int, trials: int, z: float = 1.96) -> tuple[float, float]:
@@ -346,6 +415,10 @@ def _compute_rule_result(
         "python_conversion": conversion_meta["python_code"],
         "conversion_notes": conversion_meta["conversion_notes"],
         "conversion_provider": conversion_meta.get("provider", "unknown"),
+        "conversion_execution_mode": conversion_meta.get("execution_mode", ""),
+        "conversion_cloud_connected": bool(conversion_meta.get("cloud_connected", False)),
+        "conversion_cloud_scan_id": conversion_meta.get("cloud_scan_id", ""),
+        "conversion_cloud_scan_url": conversion_meta.get("cloud_scan_url", ""),
     }
 
 
@@ -360,6 +433,7 @@ def run_pipeline(
     llm_model: str | None = None,
     perl_rules_dir: Path | None = None,
     execution_engine: str = "python",
+    soda_mode: str = "local",
     profile: str = DEFAULT_PROFILE,
 ) -> Dict[str, object]:
     """Run the full migration prototype pipeline and persist JSON results."""
@@ -461,6 +535,7 @@ def run_pipeline(
             products=products,
             db_path=db_path,
             engine=execution_engine,
+            soda_mode=soda_mode,
         )
         candidate_output = {
             "per_product": declarative_result["per_product"],
@@ -486,9 +561,33 @@ def run_pipeline(
     passed_rules = sum(1 for row in rule_results if row["status"] == "MATCH")
     total_rules = len(rule_results)
     avg_confidence = mean([row["overall_confidence"] for row in rule_results]) if rule_results else 0.0
+    generated_at_utc = datetime.now(timezone.utc).isoformat()
+    dataset_fingerprint = _dataset_fingerprint_payload(
+        products=products,
+        source_path=source_path,
+        dataset_size=dataset_size,
+        seed=seed,
+    )
+    rulepack_fingerprint = _rulepack_fingerprint_payload(structured_rules=structured_rules, profile_name=profile_name)
+    safe_timestamp = (
+        generated_at_utc.replace(":", "").replace("-", "").replace(".", "").replace("+", "p")
+    )
+    run_id = f"parity_{safe_timestamp}_{uuid4().hex[:8]}"
+    git_commit = _resolve_git_commit()
 
     result_payload: Dict[str, object] = {
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at_utc": generated_at_utc,
+        "run_fingerprint": {
+            "run_id": run_id,
+            "generated_at_utc": generated_at_utc,
+            "execution_engine": execution_engine,
+            "soda_mode": soda_mode,
+            "llm_provider": llm_provider,
+            "llm_model": llm_model or "",
+            "code_commit": git_commit,
+            "dataset_fingerprint": dataset_fingerprint,
+            "rulepack_fingerprint": rulepack_fingerprint,
+        },
         "dataset": {
             "jsonl_path": str(SAMPLE_FILE),
             "duckdb_path": str(db_path),
@@ -496,8 +595,11 @@ def run_pipeline(
             "source_jsonl": str(source_path) if source_path else "synthetic",
             "perl_rules_source": str(perl_rules_dir) if perl_rules_dir else "inline_legacy_rules",
             "execution_engine": execution_engine,
+            "soda_mode": soda_mode,
             "profile": profile_name,
             "profile_rule_count": len(structured_rules),
+            "dataset_fingerprint_sha256": dataset_fingerprint["sha256"],
+            "rulepack_fingerprint_sha256": rulepack_fingerprint["rule_ir_sha256"],
         },
         "migration_summary": {
             "total_rules": total_rules,
@@ -560,6 +662,12 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_PROFILE,
         help="Rule-pack profile to execute: global, canada, or hybrid.",
     )
+    parser.add_argument(
+        "--soda-mode",
+        choices=["local", "cloud"],
+        default="local",
+        help="Soda execution mode when --execution-engine soda: local or cloud.",
+    )
     return parser.parse_args()
 
 
@@ -573,6 +681,7 @@ def main() -> None:
         llm_model=args.llm_model,
         perl_rules_dir=args.perl_rules_dir,
         execution_engine=args.execution_engine,
+        soda_mode=args.soda_mode,
         profile=args.profile,
     )
     summary = results["migration_summary"]
@@ -581,7 +690,15 @@ def main() -> None:
     print(f"Rules needing review: {summary['rules_needing_review']}")
     print(f"Dataset source: {results['dataset']['source_jsonl']}")
     print(f"Execution engine: {results['dataset'].get('execution_engine', 'python')}")
+    if results["dataset"].get("execution_engine") == "soda":
+        print(f"Soda mode: {results['dataset'].get('soda_mode', 'local')}")
     print(f"Profile: {results['dataset'].get('profile', DEFAULT_PROFILE)}")
+    print(f"Run ID: {results.get('run_fingerprint', {}).get('run_id', 'n/a')}")
+    print(
+        "Fingerprints: "
+        f"dataset={str(results.get('run_fingerprint', {}).get('dataset_fingerprint', {}).get('sha256', ''))[:16]} | "
+        f"rulepack={str(results.get('run_fingerprint', {}).get('rulepack_fingerprint', {}).get('rule_ir_sha256', ''))[:16]}"
+    )
     print(f"Results written to: {RESULT_PATH}")
 
 

@@ -26,6 +26,9 @@ def test_parity_pipeline_smoke_simulated(tmp_path, monkeypatch) -> None:
     assert summary["total_rules"] == expected_rules
     assert summary["passed_rules"] == expected_rules
     assert summary["rules_needing_review"] == 0
+    assert "run_fingerprint" in payload
+    assert payload["run_fingerprint"]["dataset_fingerprint"]["sha256"]
+    assert payload["run_fingerprint"]["rulepack_fingerprint"]["rule_ir_sha256"]
     first_rule = payload["rule_results"][0]
     assert "parity_ci_lower" in first_rule
     assert "evidence_ci_lower" in first_rule

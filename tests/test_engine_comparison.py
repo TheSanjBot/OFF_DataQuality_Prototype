@@ -27,6 +27,11 @@ def test_engine_comparison_smoke(tmp_path) -> None:
     assert "comparison_method" in parsed
     assert "run_config" in parsed
     assert "per_complexity_summary" in parsed
+    assert parsed["run_config"]["soda_mode"] == "local"
+    assert "comparison_fingerprint" in parsed
+    assert "engine_run_fingerprints" in parsed
+    assert parsed["comparison_fingerprint"]["dataset_fingerprint_consistent"] is True
+    assert parsed["comparison_fingerprint"]["rulepack_fingerprint_consistent"] is True
     first_rule = parsed["rule_comparison"][0]
     assert set(first_rule["engines"].keys()) == set(ENGINES)
     assert "best_engine" in first_rule
