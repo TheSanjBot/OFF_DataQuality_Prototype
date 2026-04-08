@@ -1,0 +1,600 @@
+[
+  {
+    "issue_id": "9e18bf67f7a6",
+    "rule_name": "ca_allergen_evidence_missing_ingredients_text",
+    "weights": {
+      "clear_incorrect_flag": 0.22,
+      "manual_review_required": -0.22,
+      "restore_missing_supporting_field": -0.22
+    }
+  },
+  {
+    "issue_id": "b6207f50644d",
+    "rule_name": "ca_allergen_evidence_missing_ingredients_text",
+    "weights": {
+      "clear_incorrect_flag": 0.22,
+      "manual_review_required": -0.22,
+      "restore_missing_supporting_field": -0.22
+    }
+  },
+  {
+    "issue_id": "108675ba8be2",
+    "rule_name": "ca_allergen_evidence_missing_ingredients_text",
+    "weights": {
+      "clear_incorrect_flag": 0.22,
+      "manual_review_required": -0.22,
+      "restore_missing_supporting_field": -0.22
+    }
+  },
+  {
+    "issue_id": "32458c3e80ed",
+    "rule_name": "ca_contains_statement_without_allergen_evidence",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "9604ac767d57",
+    "rule_name": "ca_contains_statement_without_allergen_evidence",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "4ac846b4bce8",
+    "rule_name": "ca_fop_required_but_symbol_missing",
+    "weights": {
+      "clear_incorrect_flag": -0.22,
+      "manual_review_required": -0.22,
+      "restore_missing_supporting_field": 0.22
+    }
+  },
+  {
+    "issue_id": "955093f812d9",
+    "rule_name": "ca_fop_required_but_symbol_missing",
+    "weights": {
+      "clear_incorrect_flag": -0.22,
+      "manual_review_required": -0.22,
+      "restore_missing_supporting_field": 0.22
+    }
+  },
+  {
+    "issue_id": "dec9d52ce09c",
+    "rule_name": "ca_fop_required_but_symbol_missing",
+    "weights": {
+      "clear_incorrect_flag": -0.22,
+      "manual_review_required": -0.22,
+      "restore_missing_supporting_field": 0.22
+    }
+  },
+  {
+    "issue_id": "3ef16bf1ba4b",
+    "rule_name": "ca_fop_required_but_symbol_missing",
+    "weights": {
+      "clear_incorrect_flag": -0.22,
+      "manual_review_required": -0.22,
+      "restore_missing_supporting_field": 0.22
+    }
+  },
+  {
+    "issue_id": "6a3023309a17",
+    "rule_name": "ca_fop_required_but_symbol_missing",
+    "weights": {
+      "clear_incorrect_flag": -0.22,
+      "manual_review_required": -0.22,
+      "restore_missing_supporting_field": 0.22
+    }
+  },
+  {
+    "issue_id": "4284973e42db",
+    "rule_name": "ca_fop_symbol_present_but_not_required",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "179f11808288",
+    "rule_name": "ca_fop_symbol_present_but_not_required",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "4ccc55e833cf",
+    "rule_name": "ca_fop_symbol_present_on_exempt_product",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "00673910c705",
+    "rule_name": "ca_fop_symbol_present_on_exempt_product",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "b3ad4eff2473",
+    "rule_name": "ca_fop_symbol_present_on_exempt_product",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "9b299cb7068c",
+    "rule_name": "ca_fop_symbol_present_on_exempt_product",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "c7874deb2d9e",
+    "rule_name": "carbohydrates_over_105g",
+    "weights": {
+      "manual_review_required": -0.22,
+      "clear_suspicious_value": -0.22,
+      "clamp_to_limit": 0.22
+    }
+  },
+  {
+    "issue_id": "ead1ce7ad9a8",
+    "rule_name": "carbohydrates_over_105g",
+    "weights": {
+      "manual_review_required": -0.22,
+      "clear_suspicious_value": -0.22,
+      "clamp_to_limit": 0.22
+    }
+  },
+  {
+    "issue_id": "612aa227477e",
+    "rule_name": "energy_kcal_vs_kj",
+    "weights": {
+      "manual_review_required": -0.22,
+      "derive_from_related_field": 0.22
+    }
+  },
+  {
+    "issue_id": "45a02cbae53f",
+    "rule_name": "energy_kcal_vs_kj",
+    "weights": {
+      "manual_review_required": -0.22,
+      "derive_from_related_field": 0.22
+    }
+  },
+  {
+    "issue_id": "fa833cd4d007",
+    "rule_name": "energy_kcal_vs_kj",
+    "weights": {
+      "manual_review_required": -0.22,
+      "derive_from_related_field": 0.22
+    }
+  },
+  {
+    "issue_id": "51e60d0dd294",
+    "rule_name": "energy_kcal_vs_kj",
+    "weights": {
+      "manual_review_required": -0.22,
+      "derive_from_related_field": 0.22
+    }
+  },
+  {
+    "issue_id": "af314bb5ab32",
+    "rule_name": "energy_kcal_vs_kj",
+    "weights": {
+      "manual_review_required": -0.22,
+      "derive_from_related_field": 0.22
+    }
+  },
+  {
+    "issue_id": "e394efce3470",
+    "rule_name": "energy_kj_computed_mismatch_high",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "9c5f3fb37c9f",
+    "rule_name": "energy_kj_computed_mismatch_high",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "c8f05e3e6b2e",
+    "rule_name": "energy_kj_computed_mismatch_high",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "9ae3ff7243ee",
+    "rule_name": "energy_kj_computed_mismatch_high",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "b77c0691fcf3",
+    "rule_name": "energy_kj_computed_mismatch_high",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "b2e633f761f3",
+    "rule_name": "energy_kj_computed_mismatch_low",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "e233c131c196",
+    "rule_name": "energy_kj_computed_mismatch_low",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "18bd7cf3662d",
+    "rule_name": "energy_kj_computed_mismatch_low",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "96828841920f",
+    "rule_name": "energy_kj_computed_mismatch_low",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "4147acffc1d7",
+    "rule_name": "energy_kj_computed_mismatch_low",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "6323e5fa8068",
+    "rule_name": "energy_kj_mismatch_high",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "a3bc68d690f2",
+    "rule_name": "energy_kj_mismatch_high",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "1d1332bf5e31",
+    "rule_name": "energy_kj_mismatch_high",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "8ee158adad3b",
+    "rule_name": "energy_kj_mismatch_high",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "bd9db315fd8f",
+    "rule_name": "energy_kj_mismatch_high",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "b77b9d7100de",
+    "rule_name": "energy_kj_mismatch_low",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "bd649878cd48",
+    "rule_name": "energy_kj_mismatch_low",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "f6b5cf7d3c04",
+    "rule_name": "energy_kj_mismatch_low",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "17205f3a7daa",
+    "rule_name": "energy_kj_mismatch_low",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "31f2352bc834",
+    "rule_name": "energy_kj_mismatch_low",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "907549a46df1",
+    "rule_name": "energy_kj_over_3911",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1,
+      "clamp_to_limit": 0.1
+    }
+  },
+  {
+    "issue_id": "697c2dc6eb9c",
+    "rule_name": "energy_kj_over_3911",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1,
+      "clamp_to_limit": 0.1
+    }
+  },
+  {
+    "issue_id": "33bfd5b61279",
+    "rule_name": "energy_kj_over_3911",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1,
+      "clamp_to_limit": 0.1
+    }
+  },
+  {
+    "issue_id": "3fddf8a1b26a",
+    "rule_name": "energy_kj_over_3911",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1,
+      "clamp_to_limit": 0.1
+    }
+  },
+  {
+    "issue_id": "e0606f9a2622",
+    "rule_name": "energy_kj_over_3911",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1,
+      "clamp_to_limit": 0.1
+    }
+  },
+  {
+    "issue_id": "920bfefca388",
+    "rule_name": "fat_over_105g",
+    "weights": {
+      "manual_review_required": -0.1,
+      "clear_suspicious_value": -0.1,
+      "clamp_to_limit": 0.1
+    }
+  },
+  {
+    "issue_id": "a625da13fca3",
+    "rule_name": "fat_over_105g",
+    "weights": {
+      "manual_review_required": -0.1,
+      "clear_suspicious_value": -0.1,
+      "clamp_to_limit": 0.1
+    }
+  },
+  {
+    "issue_id": "ff46ea7ff815",
+    "rule_name": "main_language_code_missing",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "59c8197bb49e",
+    "rule_name": "main_language_code_missing",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "3d90cfc4f576",
+    "rule_name": "main_language_code_missing",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "55cf08fca0aa",
+    "rule_name": "main_language_code_missing",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "f1f3ce5b0eca",
+    "rule_name": "main_language_code_missing",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "83bd7b28a878",
+    "rule_name": "main_language_missing",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "25933fec77bc",
+    "rule_name": "main_language_missing",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "5557da4960e6",
+    "rule_name": "main_language_missing",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "d6886df9a642",
+    "rule_name": "main_language_missing",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "78fbc31a2a72",
+    "rule_name": "main_language_missing",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "7a3aebc43997",
+    "rule_name": "saturated_fat_over_105g",
+    "weights": {
+      "manual_review_required": -0.1,
+      "clear_suspicious_value": -0.1,
+      "clamp_to_limit": 0.1
+    }
+  },
+  {
+    "issue_id": "285f236c4a26",
+    "rule_name": "saturated_fat_over_105g",
+    "weights": {
+      "manual_review_required": -0.1,
+      "clear_suspicious_value": -0.1,
+      "clamp_to_limit": 0.1
+    }
+  },
+  {
+    "issue_id": "132b49ee944d",
+    "rule_name": "saturated_fat_over_105g",
+    "weights": {
+      "manual_review_required": -0.1,
+      "clear_suspicious_value": -0.1,
+      "clamp_to_limit": 0.1
+    }
+  },
+  {
+    "issue_id": "e43e6fc8a3a8",
+    "rule_name": "saturated_fat_over_105g",
+    "weights": {
+      "manual_review_required": -0.1,
+      "clear_suspicious_value": -0.1,
+      "clamp_to_limit": 0.1
+    }
+  },
+  {
+    "issue_id": "4f04890ba749",
+    "rule_name": "saturated_fat_vs_fat",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "b321bb242314",
+    "rule_name": "saturated_fat_vs_fat",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "de414ec129a8",
+    "rule_name": "saturated_fat_vs_fat",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "02bac97c1bf2",
+    "rule_name": "saturated_fat_vs_fat",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "d79beedfe4a8",
+    "rule_name": "saturated_fat_vs_fat",
+    "weights": {
+      "manual_review_required": -0.1
+    }
+  },
+  {
+    "issue_id": "662e531748ad",
+    "rule_name": "sugars_over_105g",
+    "weights": {
+      "manual_review_required": -0.1,
+      "clear_suspicious_value": -0.1,
+      "clamp_to_limit": 0.1
+    }
+  },
+  {
+    "issue_id": "a186444bcf1c",
+    "rule_name": "sugars_over_105g",
+    "weights": {
+      "manual_review_required": -0.1,
+      "clear_suspicious_value": -0.1,
+      "clamp_to_limit": 0.1
+    }
+  },
+  {
+    "issue_id": "20ffe1136388",
+    "rule_name": "sugars_plus_starch_vs_carbohydrates",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "91f543305ee5",
+    "rule_name": "sugars_plus_starch_vs_carbohydrates",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "d46f3ed83bf5",
+    "rule_name": "sugars_plus_starch_vs_carbohydrates",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "1ee75f9df951",
+    "rule_name": "sugars_plus_starch_vs_carbohydrates",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  },
+  {
+    "issue_id": "ccd9da44b61c",
+    "rule_name": "sugars_plus_starch_vs_carbohydrates",
+    "weights": {
+      "manual_review_required": -0.1,
+      "derive_from_related_field": 0.1
+    }
+  }
+]

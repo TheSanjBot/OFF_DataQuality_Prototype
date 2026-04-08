@@ -336,6 +336,38 @@ def _rule_recommendation(rule_row: Mapping[str, object], best_engine: str) -> st
     return f"Prefer {best_engine} for this rule under current evidence."
 
 
+def _migration_state(rule_row: Mapping[str, object], best_engine: str) -> Tuple[str, str]:
+    status = str(rule_row.get("status", "REVIEW"))
+    mismatches = int(rule_row.get("mismatches", 0))
+    provider = str(rule_row.get("conversion_provider", "unknown"))
+    parity_ci_lower = float(rule_row.get("parity_ci_lower", 0.0))
+    effective_confidence = _effective_confidence(best_engine, rule_row)
+    legal_review_status = str(rule_row.get("review_status", "")).strip().lower()
+
+    if status != "MATCH" or mismatches > 0:
+        return "review", "Parity mismatches remain or the rule still needs manual inspection."
+
+    if best_engine == "python" and str(rule_row.get("equivalence_status", "PASS")) != "PASS":
+        return "review", "Python conversion has not yet passed equivalence verification."
+
+    if parity_ci_lower < 0.95:
+        return "review", "Parity evidence is still too weak for acceptance."
+
+    if _is_fallback_provider(provider):
+        return "candidate", "Behavior matches, but the current engine/provider is still a fallback path."
+
+    if best_engine == "python" and float(rule_row.get("mutation_score", 1.0)) < 0.60:
+        return "candidate", "Python rule matches, but mutation resistance should be improved before acceptance."
+
+    if effective_confidence < 0.10:
+        return "candidate", "Rule matches the baseline, but confidence remains too low for final acceptance."
+
+    if legal_review_status in {"draft", "pending-mentor-review"}:
+        return "candidate", "Technically validated, but regulatory review is still pending."
+
+    return "accepted", "Rule meets parity, provider-quality, and verification requirements."
+
+
 def _build_complexity_summary(rule_comparison: Sequence[Mapping[str, object]]) -> Dict[str, Dict[str, object]]:
     summary: Dict[str, Dict[str, object]] = {}
     for tier in ("simple", "medium", "intricate", "unknown"):
@@ -358,6 +390,16 @@ def _build_complexity_summary(rule_comparison: Sequence[Mapping[str, object]]) -
                 4,
             ),
         }
+    return summary
+
+
+def _build_migration_state_summary(rule_comparison: Sequence[Mapping[str, object]]) -> Dict[str, int]:
+    summary = {"accepted": 0, "candidate": 0, "review": 0}
+    for row in rule_comparison:
+        state = str(row.get("migration_state", "review")).lower()
+        if state not in summary:
+            state = "review"
+        summary[state] += 1
     return summary
 
 
@@ -414,6 +456,9 @@ def _build_rule_comparison(engine_payloads: Mapping[str, Mapping[str, object]]) 
             "recommendation": _rule_recommendation(per_engine[best_engine], best_engine),
             "engines": {},
         }
+        migration_state, migration_state_reason = _migration_state(per_engine[best_engine], best_engine)
+        rule_out["migration_state"] = migration_state
+        rule_out["migration_state_reason"] = migration_state_reason
         for engine, row in per_engine.items():
             conversion_text = row.get("python_conversion", "")
             provider = str(row.get("conversion_provider", "unknown"))
@@ -532,6 +577,7 @@ def run_engine_comparison(
     per_engine_summary = {engine: _engine_summary(engine, payload) for engine, payload in engine_payloads.items()}
     rule_comparison = _build_rule_comparison(engine_payloads)
     complexity_summary = _build_complexity_summary(rule_comparison)
+    migration_state_summary = _build_migration_state_summary(rule_comparison)
     generated_at_utc = datetime.now(timezone.utc).isoformat()
     comparison_fingerprint = _comparison_fingerprint_payload(
         engine_payloads=engine_payloads,
@@ -575,6 +621,7 @@ def run_engine_comparison(
         },
         "per_engine_summary": per_engine_summary,
         "per_complexity_summary": complexity_summary,
+        "migration_state_summary": migration_state_summary,
         "rule_comparison": rule_comparison,
         "run_config": {
             "llm_provider": llm_provider,
@@ -671,6 +718,14 @@ def main() -> None:
             f"avg_overall={summary['avg_overall_confidence']:.2%}, "
             f"avg_effective={summary['avg_effective_confidence']:.2%}, "
             f"fallback_rules={summary['fallback_rules']}"
+        )
+    if report.get("migration_state_summary"):
+        states = report["migration_state_summary"]
+        print(
+            "migration states: "
+            f"accepted={states.get('accepted', 0)}, "
+            f"candidate={states.get('candidate', 0)}, "
+            f"review={states.get('review', 0)}"
         )
     if report.get("run_config"):
         print(

@@ -1,0 +1,92 @@
+{
+  "global": {
+    "clamp_to_limit": {
+      "accepted": 6,
+      "rejected": 0
+    },
+    "clear_suspicious_value": {
+      "accepted": 0,
+      "rejected": 6
+    },
+    "manual_review_required": {
+      "accepted": 0,
+      "rejected": 22
+    },
+    "derive_from_related_field": {
+      "accepted": 6,
+      "rejected": 0
+    },
+    "restore_missing_supporting_field": {
+      "accepted": 5,
+      "rejected": 5
+    },
+    "clear_incorrect_flag": {
+      "accepted": 5,
+      "rejected": 5
+    },
+    "__manual_edit__": {
+      "accepted": 1,
+      "rejected": 0
+    }
+  },
+  "by_rule": {
+    "carbohydrates_over_105g": {
+      "clamp_to_limit": {
+        "accepted": 6,
+        "rejected": 0
+      },
+      "clear_suspicious_value": {
+        "accepted": 0,
+        "rejected": 6
+      },
+      "manual_review_required": {
+        "accepted": 0,
+        "rejected": 6
+      }
+    },
+    "energy_kcal_vs_kj": {
+      "derive_from_related_field": {
+        "accepted": 6,
+        "rejected": 0
+      },
+      "manual_review_required": {
+        "accepted": 0,
+        "rejected": 6
+      },
+      "__manual_edit__": {
+        "accepted": 1,
+        "rejected": 0
+      }
+    },
+    "ca_fop_required_but_symbol_missing": {
+      "restore_missing_supporting_field": {
+        "accepted": 3,
+        "rejected": 0
+      },
+      "clear_incorrect_flag": {
+        "accepted": 0,
+        "rejected": 3
+      },
+      "manual_review_required": {
+        "accepted": 0,
+        "rejected": 3
+      }
+    },
+    "ca_allergen_evidence_missing_ingredients_text": {
+      "clear_incorrect_flag": {
+        "accepted": 5,
+        "rejected": 2
+      },
+      "restore_missing_supporting_field": {
+        "accepted": 2,
+        "rejected": 5
+      },
+      "manual_review_required": {
+        "accepted": 0,
+        "rejected": 7
+      }
+    }
+  },
+  "decision_count": 1604,
+  "last_updated": "2026-04-06T17:35:28.137389+00:00"
+}

@@ -1,0 +1,1 @@
+{"patch_id": "6e0f0f4d6f175d", "issue_id": "612aa227477e", "product_id": "0000000000001", "rule_name": "energy_kcal_vs_kj", "field": "energy_kcal", "old_value": 4333.1, "new_value": 334.85, "source_fix_id": "612aa227477e_derive_kcal", "source_kind": "suggested_fix", "review_notes": "612aa227477e - first option", "reviewer_name": "Sanjay H", "reviewed_at_utc": ""}

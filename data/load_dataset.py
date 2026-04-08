@@ -42,6 +42,19 @@ CORE_FIELDS = [
 OPTIONAL_FIELDS = ["lc", "lang", "language_code"]
 
 
+def _looks_like_normalized_product(record: Mapping[str, object]) -> bool:
+    """Return True when a JSONL row already matches the prototype schema."""
+    return "product_id" in record and any(field in record for field in CORE_FIELDS[1:] + OPTIONAL_FIELDS)
+
+
+def _normalize_existing_product_record(record: Mapping[str, object]) -> Dict[str, object]:
+    """Project an existing normalized record onto the expected prototype fields."""
+    normalized: Dict[str, object] = {"product_id": str(record.get("product_id", ""))}
+    for field in CORE_FIELDS[1:] + OPTIONAL_FIELDS:
+        normalized[field] = record.get(field)
+    return normalized
+
+
 def _to_int_flag(value: bool) -> int:
     return 1 if value else 0
 
@@ -405,7 +418,10 @@ def extract_products_from_off_jsonl(source_path: Path, max_products: int = 300) 
                 continue
             if not isinstance(record, Mapping):
                 continue
-            extracted = extract_product_from_off_record(record)
+            if _looks_like_normalized_product(record):
+                extracted = _normalize_existing_product_record(record)
+            else:
+                extracted = extract_product_from_off_record(record)
             if extracted is not None:
                 products.append(extracted)
 

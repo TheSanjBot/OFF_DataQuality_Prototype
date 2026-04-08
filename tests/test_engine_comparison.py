@@ -27,6 +27,7 @@ def test_engine_comparison_smoke(tmp_path) -> None:
     assert "comparison_method" in parsed
     assert "run_config" in parsed
     assert "per_complexity_summary" in parsed
+    assert "migration_state_summary" in parsed
     assert parsed["run_config"]["soda_mode"] == "local"
     assert "comparison_fingerprint" in parsed
     assert "engine_run_fingerprints" in parsed
@@ -36,6 +37,8 @@ def test_engine_comparison_smoke(tmp_path) -> None:
     assert set(first_rule["engines"].keys()) == set(ENGINES)
     assert "best_engine" in first_rule
     assert "recommendation" in first_rule
+    assert "migration_state" in first_rule
+    assert "migration_state_reason" in first_rule
     assert "complexity" in first_rule
     assert "effective_confidence" in first_rule["engines"]["python"]
     assert "provider_factor" in first_rule["engines"]["python"]

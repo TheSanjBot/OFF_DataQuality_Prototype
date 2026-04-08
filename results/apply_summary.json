@@ -1,0 +1,52 @@
+{
+  "source_jsonl_path": "C:\\Users\\Administrator\\Downloads\\off_quality_migration_prototype\\results\\review_source_dataset.jsonl",
+  "corrected_dataset_path": "C:\\Users\\Administrator\\Downloads\\off_quality_migration_prototype\\results\\corrected_dataset.jsonl",
+  "patches_path": "C:\\Users\\Administrator\\Downloads\\off_quality_migration_prototype\\results\\correction_patches.jsonl",
+  "review_rows": 190,
+  "approved_rows": 1,
+  "rejected_rows": 0,
+  "skipped_rows": 189,
+  "applied_patch_count": 1,
+  "changed_products": 1,
+  "reviewed_sheet_path": "C:\\Users\\Administrator\\Downloads\\off_quality_migration_prototype\\results\\reviewed_sheet.csv",
+  "issues_path": "C:\\Users\\Administrator\\Downloads\\off_quality_migration_prototype\\results\\issues.json",
+  "audit_log_path": "C:\\Users\\Administrator\\Downloads\\off_quality_migration_prototype\\results\\audit_log.jsonl",
+  "source_snapshot_path": "C:\\Users\\Administrator\\Downloads\\off_quality_migration_prototype\\results\\review_source_dataset.jsonl",
+  "feedback_store_path": "C:\\Users\\Administrator\\Downloads\\off_quality_migration_prototype\\results\\feedback_store.json",
+  "review_validation_summary_path": "C:\\Users\\Administrator\\Downloads\\off_quality_migration_prototype\\results\\review_validation_summary.json",
+  "feedback_summary": {
+    "decision_count": 1604,
+    "tracked_rules": 4,
+    "tracked_strategies": 7,
+    "top_strategies": [
+      {
+        "fix_strategy": "clamp_to_limit",
+        "accepted": 6,
+        "rejected": 0
+      },
+      {
+        "fix_strategy": "derive_from_related_field",
+        "accepted": 6,
+        "rejected": 0
+      },
+      {
+        "fix_strategy": "restore_missing_supporting_field",
+        "accepted": 5,
+        "rejected": 5
+      },
+      {
+        "fix_strategy": "clear_incorrect_flag",
+        "accepted": 5,
+        "rejected": 5
+      },
+      {
+        "fix_strategy": "clear_suspicious_value",
+        "accepted": 0,
+        "rejected": 6
+      }
+    ]
+  },
+  "generated_at_utc": "2026-04-06T17:35:28.149388+00:00",
+  "apply_summary_path": "C:\\Users\\Administrator\\Downloads\\off_quality_migration_prototype\\results\\apply_summary.json",
+  "audit_entry_count": 1
+}

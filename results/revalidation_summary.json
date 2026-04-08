@@ -1,0 +1,173 @@
+{
+  "corrected_dataset_path": "C:\\Users\\Administrator\\Downloads\\off_quality_migration_prototype\\results\\corrected_dataset.jsonl",
+  "patches_path": "C:\\Users\\Administrator\\Downloads\\off_quality_migration_prototype\\results\\correction_patches.jsonl",
+  "audit_log_path": "C:\\Users\\Administrator\\Downloads\\off_quality_migration_prototype\\results\\audit_log.jsonl",
+  "before_issue_count": 843,
+  "after_issue_count": 111,
+  "resolved_issue_count": 732,
+  "introduced_issue_count": 0,
+  "issue_resolution_rate": 0.8683,
+  "quality_score_before": 0.8521,
+  "quality_score_after": 0.9805,
+  "quality_score_delta": 0.1284,
+  "before_rules_with_issues": 19,
+  "after_rules_with_issues": 19,
+  "before_passed_rules": 8,
+  "after_passed_rules": 0,
+  "before_comparison_run_id": "comparison_20260402T053459853209p0000_50a08d64",
+  "after_comparison_run_id": "comparison_20260406T174203167859p0000_2bc39550",
+  "per_rule_changes": [
+    {
+      "rule_name": "saturated_fat_vs_fat",
+      "before_count": 76,
+      "after_count": 10,
+      "resolved_count": 66,
+      "introduced_count": 0,
+      "delta": 66
+    },
+    {
+      "rule_name": "energy_kj_mismatch_low",
+      "before_count": 69,
+      "after_count": 9,
+      "resolved_count": 60,
+      "introduced_count": 0,
+      "delta": 60
+    },
+    {
+      "rule_name": "main_language_missing",
+      "before_count": 66,
+      "after_count": 10,
+      "resolved_count": 56,
+      "introduced_count": 0,
+      "delta": 56
+    },
+    {
+      "rule_name": "energy_kj_over_3911",
+      "before_count": 64,
+      "after_count": 8,
+      "resolved_count": 56,
+      "introduced_count": 0,
+      "delta": 56
+    },
+    {
+      "rule_name": "main_language_code_missing",
+      "before_count": 59,
+      "after_count": 7,
+      "resolved_count": 52,
+      "introduced_count": 0,
+      "delta": 52
+    },
+    {
+      "rule_name": "ca_fop_required_but_symbol_missing",
+      "before_count": 60,
+      "after_count": 9,
+      "resolved_count": 51,
+      "introduced_count": 0,
+      "delta": 51
+    },
+    {
+      "rule_name": "energy_kj_computed_mismatch_high",
+      "before_count": 52,
+      "after_count": 7,
+      "resolved_count": 45,
+      "introduced_count": 0,
+      "delta": 45
+    },
+    {
+      "rule_name": "sugars_plus_starch_vs_carbohydrates",
+      "before_count": 53,
+      "after_count": 12,
+      "resolved_count": 41,
+      "introduced_count": 0,
+      "delta": 41
+    },
+    {
+      "rule_name": "saturated_fat_over_105g",
+      "before_count": 42,
+      "after_count": 4,
+      "resolved_count": 38,
+      "introduced_count": 0,
+      "delta": 38
+    },
+    {
+      "rule_name": "ca_allergen_evidence_missing_ingredients_text",
+      "before_count": 41,
+      "after_count": 3,
+      "resolved_count": 38,
+      "introduced_count": 0,
+      "delta": 38
+    },
+    {
+      "rule_name": "carbohydrates_over_105g",
+      "before_count": 36,
+      "after_count": 2,
+      "resolved_count": 34,
+      "introduced_count": 0,
+      "delta": 34
+    },
+    {
+      "rule_name": "energy_kcal_vs_kj",
+      "before_count": 38,
+      "after_count": 5,
+      "resolved_count": 33,
+      "introduced_count": 0,
+      "delta": 33
+    },
+    {
+      "rule_name": "energy_kj_mismatch_high",
+      "before_count": 39,
+      "after_count": 8,
+      "resolved_count": 31,
+      "introduced_count": 0,
+      "delta": 31
+    },
+    {
+      "rule_name": "energy_kj_computed_mismatch_low",
+      "before_count": 34,
+      "after_count": 5,
+      "resolved_count": 29,
+      "introduced_count": 0,
+      "delta": 29
+    },
+    {
+      "rule_name": "sugars_over_105g",
+      "before_count": 29,
+      "after_count": 2,
+      "resolved_count": 27,
+      "introduced_count": 0,
+      "delta": 27
+    },
+    {
+      "rule_name": "ca_fop_symbol_present_on_exempt_product",
+      "before_count": 30,
+      "after_count": 4,
+      "resolved_count": 26,
+      "introduced_count": 0,
+      "delta": 26
+    },
+    {
+      "rule_name": "fat_over_105g",
+      "before_count": 27,
+      "after_count": 2,
+      "resolved_count": 25,
+      "introduced_count": 0,
+      "delta": 25
+    },
+    {
+      "rule_name": "ca_fop_symbol_present_but_not_required",
+      "before_count": 14,
+      "after_count": 2,
+      "resolved_count": 12,
+      "introduced_count": 0,
+      "delta": 12
+    },
+    {
+      "rule_name": "ca_contains_statement_without_allergen_evidence",
+      "before_count": 14,
+      "after_count": 2,
+      "resolved_count": 12,
+      "introduced_count": 0,
+      "delta": 12
+    }
+  ]
+}

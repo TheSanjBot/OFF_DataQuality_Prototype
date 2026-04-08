@@ -1,0 +1,1 @@
+{"product_id": "0000000000001", "field": "energy_kcal", "old_value": 4333.1, "new_value": 334.85, "rule_name": "energy_kcal_vs_kj", "fix_id": "612aa227477e_derive_kcal", "timestamp": "2026-04-06T17:35:28.130388+00:00", "review_action": "approve", "issue_id": "612aa227477e", "review_notes": "612aa227477e - first option", "reviewer_name": "Sanjay H", "reviewed_at_utc": ""}
